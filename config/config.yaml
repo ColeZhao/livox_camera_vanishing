@@ -1,0 +1,8 @@
+image_file: "/home/collar/data/calib_test.png"
+pcd_file: "/home/collar/data/calib_test.pcd"
+
+camera:
+    camera_inner: [640, 0.0,      100,
+                0.0,     640,  100,
+                0.0,     0.0,      1.0     ]
+    camera_distortion: [0,  0, 0 , 0, 0]

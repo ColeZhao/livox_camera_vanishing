@@ -10,7 +10,14 @@ add_compile_options(-std=c++14)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
+  pcl_ros
 )
+
+find_package(Eigen3)
+find_package(OpenCV)
+find_package(PCL REQUIRED)
+
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -117,6 +124,9 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
+  ${Eigen3_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+  ${PCL_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -132,7 +142,7 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-add_executable(${PROJECT_NAME}_test src/livox_camera_vanishing_node.cpp)
+add_executable(${PROJECT_NAME}_test src/livox_camera_vanishing_node.cpp include/lidar_projection.hpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -147,6 +157,9 @@ add_executable(${PROJECT_NAME}_test src/livox_camera_vanishing_node.cpp)
 ## Specify libraries to link a library or executable target against
 target_link_libraries(${PROJECT_NAME}_test
   ${catkin_LIBRARIES}
+  ${Eigen3_LIBS}
+  ${OpenCV_LIBS}
+  ${PCL_LIBS}
 )
 
 #############

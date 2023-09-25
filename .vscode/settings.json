@@ -6,6 +6,11 @@
         "/opt/ros/noetic/lib/python3/dist-packages"
     ],
     "files.associations": {
-        "ostream": "cpp"
+        "ostream": "cpp",
+        "dense": "cpp",
+        "iostream": "cpp",
+        "core": "cpp",
+        "numericaldiff": "cpp",
+        "cmath": "cpp"
     }
 }

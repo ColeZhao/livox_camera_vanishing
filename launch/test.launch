@@ -1,0 +1,15 @@
+<launch>
+  <rosparam command="load" file="$(find livox_camera_vanishing)/config/config.yaml" />
+  <node 
+    pkg="livox_camera_vanishing"
+    type="livox_camera_vanishing_test"
+    name="livox_camera_vanishing_test"
+    output="screen"
+  />
+  <!-- <node 
+    pkg="rviz"
+    type="rviz"
+    name="rviz"
+    args="-d $(find livox_camera_calib)/rviz_cfg/calib.rviz"
+  /> -->
+</launch>
