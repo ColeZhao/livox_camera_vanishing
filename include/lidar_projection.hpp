@@ -51,11 +51,10 @@ LidarProjection::LidarProjection(const std::string &pcd_file)
     {
         ROS_INFO("Load PCD file sucessfully!");
     }
-    cout<<pcd_file << endl;
 };
 
 void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::PointCloud<pcl::PointXYZI>::Ptr &lidar_cloud , cv::Mat &projection_img)
-{
+{ 
     int test_num = 0;
     std::vector<cv::Point3f> pts_3d;
     std::vector<float> intensity_list;
@@ -83,7 +82,7 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
     cv::Mat t_vec = (cv::Mat_<double>(3, 1) << extrinsic_params[3] , extrinsic_params[4] , extrinsic_params[5]);//用于投影的外参数
 
     std::vector<cv::Point2f> pts_2d;//用于投影的2d点
-    std::cout << distortion_coeff << std::endl;
+
     cv::projectPoints(pts_3d , r_vec , t_vec , camera_matrix , distortion_coeff , pts_2d);//用opencv进行3d到2d点的投影
 
     cv::Mat image_project = cv::Mat::zeros(height , width , CV_16UC1);
@@ -94,8 +93,6 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
         cv::Point2f point_2d = pts_2d[i];
         if(point_2d.x <= 0 || point_2d.x >= width || point_2d.y <= 0 || point_2d.y >= height)
         {
-
-            cout << point_2d.x << " and " <<  point_2d.y << endl;
             continue;
         }
         else

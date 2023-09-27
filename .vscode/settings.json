@@ -11,6 +11,8 @@
         "iostream": "cpp",
         "core": "cpp",
         "numericaldiff": "cpp",
-        "cmath": "cpp"
+        "cmath": "cpp",
+        "*.ipp": "cpp",
+        "bitset": "cpp"
     }
 }
