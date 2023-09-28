@@ -56,7 +56,7 @@ vector<cv::Point2d> calcIntersectionPoint(vector<cv::Vec4f> lines_calib)
 {   //这个函数就不考虑只选择了三条直线的情况了，三条直线的情况后面单独实现，跟在selected后边
     for(int i = 0 ; i < calib_lines_sets_num ; i++)
     {
-
+        
     }
 }
 
