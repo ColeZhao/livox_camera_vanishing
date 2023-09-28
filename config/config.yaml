@@ -10,6 +10,6 @@ camera:
 calib:
     depth_weight: 0.7
     init_transform: [1.57 , -1.57 , 0 , 0 , 0 , 0]
-    img_lines_num: 50
-    proj_lines_num: 50
+    max_orig_lines_num: 50
+    max_proj_lines_num: 50
 

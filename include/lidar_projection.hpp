@@ -27,7 +27,7 @@ class LidarProjection
         cv::Mat getProjectionImage(const Vector6d & extrinsic_params);
         cv::Mat fillImg(const cv::Mat &input_img);
 
-        pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_orin_cloud;
+        pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_orig_cloud;
 
         double min_depth = 1.0;
         double max_depth = 10.0;
@@ -41,8 +41,8 @@ class LidarProjection
 
 LidarProjection::LidarProjection(const std::string &pcd_file)
 {   
-    lidar_orin_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
-    if(pcl::io::loadPCDFile(pcd_file , *lidar_orin_cloud) == -1)
+    lidar_orig_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
+    if(pcl::io::loadPCDFile(pcd_file , *lidar_orig_cloud) == -1)
     {
         ROS_ERROR("Failed load PCD file.");
         exit(1);
@@ -122,12 +122,12 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
 cv::Mat LidarProjection::getProjectionImage(const Vector6d &extrinsic_params)
 {
     cv::Mat projection_img;
-    projection(extrinsic_params , lidar_orin_cloud , projection_img);
+    projection(extrinsic_params , lidar_orig_cloud , projection_img);
     return projection_img;
 };
 
 cv::Mat LidarProjection::fillImg(const cv::Mat &input_img)
-{   //只能处理一些噪点及点云密度不足的情况，没有办法对遮挡进行处理，是否能在这个地方对0值和多值问题进行处理呢
+{   //TODO：只能处理一些噪点及点云密度不足的情况，没有办法对遮挡进行处理，是否能在这个地方对0值和多值问题进行处理呢
     cv::Mat output_img = input_img.clone();
     for( int y = 2 ; y < input_img.rows - 2 ; y++)
     {
