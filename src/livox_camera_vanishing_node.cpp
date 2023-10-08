@@ -43,7 +43,8 @@ int label_line_selected;
 vector<cv::Vec4f> lines_selected_orig;
 vector<cv::Vec4f> lines_selected_proj;
 //Lines which are selected
-
+vector<cv::Point2d> vanishing_pts_orig;
+vector<cv::Point2d> vanishing_pts_proj;
 
 struct sort_lines_by_length
 {
@@ -52,12 +53,42 @@ struct sort_lines_by_length
     }
 };
 
-vector<cv::Point2d> calcIntersectionPoint(vector<cv::Vec4f> lines_calib)
+vector<cv::Point2d> calcVanishingPoint(vector<cv::Vec4f> lines_calib)
 {   //这个函数就不考虑只选择了三条直线的情况了，三条直线的情况后面单独实现，跟在selected后边
+    vector<cv::Point2d> vanishing_pts;
+    cv::Point2d vanishing_pt;
+    double slope[4];
+    double intercept[4];
     for(int i = 0 ; i < calib_lines_sets_num ; i++)
     {
-        
+        for(int j = 0 ; j < 4 ; j++)
+        {   //求解直线斜率和截距
+            slope[j] = (lines_calib[4 * i + j](1) - lines_calib[4 * i + j](3)) / (lines_calib[4 * i + j](0) - lines_calib[4 * i + j](2));
+            intercept[j] = lines_calib[4 * i + j](1) - slope[j] * lines_calib[4 * i + j](0);
+        }
+        if(slope[0] != slope[1])
+        {   //直线在图像上不平行
+            vanishing_pt.x = (intercept[1] - intercept[0]) / (slope[0] - slope[1]);
+            vanishing_pt.y = slope[0] * vanishing_pt.x + intercept[0];
+            vanishing_pts.emplace_back(vanishing_pt);
+        }
+        else
+        {
+            cout << "Error! These two lines are parallel." << endl;
+        }
+        if(slope[2] != slope[3])
+        {   //直线在图像上不平行
+            vanishing_pt.x = (intercept[3] - intercept[2]) / (slope[2] - slope[3]);
+            vanishing_pt.y = slope[2] * vanishing_pt.x + intercept[2];
+            vanishing_pts.emplace_back(vanishing_pt);
+
+        }
+        else
+        {
+            cout << "Error! These two lines are parallel." << endl;
+        }
     }
+    return vanishing_pts;
 }
 
 
@@ -118,7 +149,6 @@ int main(int argc , char **argv)
     cv::medianBlur(image_gray , image_gray , 3);
     lsd->detect(image_gray , lines_lsd_orig );
     sort(lines_lsd_orig.begin() , lines_lsd_orig.end() , sort_lines_by_length());
-    cout << lines_lsd_orig.size() << endl;
     lines_lsd_orig.resize(max_proj_lines_num);
     cv::Mat lsd_orig_gray = image_gray.clone();
     lsd->drawSegments(lsd_orig_gray , lines_lsd_orig);
@@ -177,9 +207,8 @@ int main(int argc , char **argv)
 
     for(auto it = label_lines_selected_orig.begin() ; it != label_lines_selected_orig.end() ; ++it)
     {
-        auto label = *it;
-        lines_selected_orig.emplace_back(lines_lsd_orig[label]);
-        cout << label << " ";
+        lines_selected_orig.emplace_back(lines_lsd_orig[*it]);
+        cout << *it << " ";
     }
     cout << endl;
     
@@ -201,9 +230,8 @@ int main(int argc , char **argv)
     cout << "You have choosen lines in projection image whose label are :" << endl;
     for(auto it = label_lines_selected_proj.begin() ; it != label_lines_selected_proj.end() ; ++it)
     {
-        auto label = *it;
-        lines_selected_proj.emplace_back(lines_lsd_proj[label]);
-        cout << label << " ";
+        lines_selected_proj.emplace_back(lines_lsd_proj[*it]);
+        cout << *it << " ";
     }
     cout << endl;
 
@@ -213,9 +241,22 @@ int main(int argc , char **argv)
         cv::putText(test_mat , to_string(label_lines_selected_proj[i]) , cv::Point((lines_selected_proj[i](0) + lines_selected_proj[i](2)) / 2 , (lines_selected_proj[i](1) + lines_selected_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
     }
     cv::imshow("proj image selected" , test_mat);
-    //TODO:需要修改成能够选择多条直线，然后完成3条直线确定一个正方形的代码
+    //TODO:需要修改成能够选择多条直线，然后完成3条直线确定一个正方形的代码，输入选择直线的时候要求按照一组平行线连续输入
     //Select lines that will be used in calibration manually and show them
 
+    vanishing_pts_orig = calcVanishingPoint(lines_selected_orig);
+    vanishing_pts_proj = calcVanishingPoint(lines_selected_proj);
+    //这里已经把消失点算出来了，然后根据消失点理论分别计算外参的旋转矩阵和位置
+    cout << "The vanishing points in origin image are:" << endl;
+    for(auto it = vanishing_pts_orig.begin() ; it != vanishing_pts_orig.end() ; it++)
+    {
+        cout << *it << endl;
+    }
+    cout << "The vanishing point in projection image are:" << endl;
+    for(auto it = vanishing_pts_proj.begin() ; it != vanishing_pts_proj.end() ; it++)
+    {
+        cout << *it << endl;
+    }
 
     cv::waitKey(0);
     return 0;
