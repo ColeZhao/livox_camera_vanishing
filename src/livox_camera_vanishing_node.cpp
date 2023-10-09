@@ -1,5 +1,6 @@
 #include <iostream>
 #include <ros/ros.h>
+#include <math.h>
 
 #include <eigen3/Eigen/Dense>
 #include <opencv2/opencv.hpp>
@@ -43,9 +44,11 @@ int label_line_selected;
 vector<cv::Vec4f> lines_selected_orig;
 vector<cv::Vec4f> lines_selected_proj;
 //Lines which are selected
-vector<cv::Point2d> vanishing_pts_orig;
-vector<cv::Point2d> vanishing_pts_proj;
+vector<cv::Point2d> intersection_pts_orig;
+vector<cv::Point2d> intersection_pts_proj;
 
+Eigen::Matrix3d R_w_c , R_w_l , R_l_c;
+Eigen::Vector3d t_w_c , t_w_l , t_l_c;
 struct sort_lines_by_length
 {
     inline bool operator()(const cv::Vec4f& a, const cv::Vec4f& b){
@@ -53,10 +56,10 @@ struct sort_lines_by_length
     }
 };
 
-vector<cv::Point2d> calcVanishingPoint(vector<cv::Vec4f> lines_calib)
+vector<cv::Point2d> calcIntersectionPoint(vector<cv::Vec4f> lines_calib)
 {   //这个函数就不考虑只选择了三条直线的情况了，三条直线的情况后面单独实现，跟在selected后边
-    vector<cv::Point2d> vanishing_pts;
-    cv::Point2d vanishing_pt;
+    vector<cv::Point2d> intersection_pts;
+    cv::Point2d intersection_pt;
     double slope[4];
     double intercept[4];
     for(int i = 0 ; i < calib_lines_sets_num ; i++)
@@ -68,9 +71,9 @@ vector<cv::Point2d> calcVanishingPoint(vector<cv::Vec4f> lines_calib)
         }
         if(slope[0] != slope[1])
         {   //直线在图像上不平行
-            vanishing_pt.x = (intercept[1] - intercept[0]) / (slope[0] - slope[1]);
-            vanishing_pt.y = slope[0] * vanishing_pt.x + intercept[0];
-            vanishing_pts.emplace_back(vanishing_pt);
+            intersection_pt.x = (intercept[1] - intercept[0]) / (slope[0] - slope[1]);
+            intersection_pt.y = slope[0] * intersection_pt.x + intercept[0];
+            intersection_pts.emplace_back(intersection_pt);
         }
         else
         {
@@ -78,20 +81,92 @@ vector<cv::Point2d> calcVanishingPoint(vector<cv::Vec4f> lines_calib)
         }
         if(slope[2] != slope[3])
         {   //直线在图像上不平行
-            vanishing_pt.x = (intercept[3] - intercept[2]) / (slope[2] - slope[3]);
-            vanishing_pt.y = slope[2] * vanishing_pt.x + intercept[2];
-            vanishing_pts.emplace_back(vanishing_pt);
+            intersection_pt.x = (intercept[3] - intercept[2]) / (slope[2] - slope[3]);
+            intersection_pt.y = slope[2] * intersection_pt.x + intercept[2];
+            intersection_pts.emplace_back(intersection_pt);
 
         }
         else
         {
             cout << "Error! These two lines are parallel." << endl;
         }
+
+        //然后开始求解四条平行线的交点
+        intersection_pt.x = (intercept[0] - intercept[2]) / (slope[2] - slope[0]);
+        intersection_pt.y = slope[2] * intersection_pt.x + intercept[2];
+        intersection_pts.emplace_back(intersection_pt);//corner_a
+
+        intersection_pt.x = (intercept[0] - intercept[3]) / (slope[3] - slope[0]);
+        intersection_pt.y = slope[3] * intersection_pt.x + intercept[3];
+        intersection_pts.emplace_back(intersection_pt);//corner_b
     }
-    return vanishing_pts;
+    return intersection_pts;
 }
 
 
+Eigen::Matrix3d calcRotation(vector<double> camera_inner , vector<cv::Point2d> intersection_pts)
+{
+    //TODO：使用消失点坐标作叉乘时原点坐标需要被确定，理论上应该是以光新为原点才能够获得对应的旋转矩阵
+    Eigen::Matrix3d R_w;
+    Eigen::Matrix3d K_c;
+    Eigen::Vector3d vanishing_pt1 , vanishing_pt2 , mian_pt;
+    Eigen::Vector3d R_w_1 , R_w_2 , R_w_3;
+
+    double f_average = (camera_inner[0] + camera_inner[4]) / 2;
+
+    // vanishing_pt1 << intersection_pts[0].x - camera_inner[2] , intersection_pts[0].y - camera_inner[5] , f_average;
+    // vanishing_pt2 << intersection_pts[1].x - camera_inner[2] , intersection_pts[1].y - camera_inner[5] , f_average;//光心在空间坐标系当中与主点重合，所以把相平面坐标系转化到相机坐标系下的消失点如上
+
+    vanishing_pt1 << intersection_pts[0].x , intersection_pts[0].y , 1;
+    vanishing_pt2 << intersection_pts[1].x , intersection_pts[1].y , 1;//光心在空间坐标系当中与主点重合，所以把相平面坐标系转化到相机坐标系下的消失点如上
+
+    K_c << camera_inner[0] , camera_inner[1] , camera_inner[2] , camera_inner[3] , camera_inner[4] , camera_inner[5] , camera_inner[6] , camera_inner[7] , camera_inner[8];
+
+    R_w_1 = (K_c.inverse() * vanishing_pt1).normalized();
+    R_w_2 = (K_c.inverse() * vanishing_pt2).normalized();//目前看来两种表述方法获得的结果是一致的
+    // R_w_1 = (vanishing_pt1).normalized();
+    // R_w_2 = (vanishing_pt2).normalized();
+    R_w_3 = (R_w_1.cross(R_w_2)).normalized();
+
+    R_w << R_w_1 , R_w_2 , R_w_3;
+    R_w = R_w.transpose().normalized();
+    return R_w;
+}
+
+Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> intersection_pts , double length_AB)
+{
+    //TODO：同样如上需要对坐标系与坐标原点进行确定
+    Eigen::Vector3d t_w;
+
+    double length = 0;
+    // double f_average = (camera_inner[0] + camera_inner[4]) / 2;//平均焦距
+    double f_average = 5120;
+    cout << "f_average = " << f_average << endl;
+
+    Eigen::Vector3d corner_a , corner_b , main_pt , vanishing_pt1 , vanishing_pt2;
+    corner_a << intersection_pts[3].x - camera_inner[2] , intersection_pts[3].y - camera_inner[5] , f_average;
+    corner_b << intersection_pts[4].x - camera_inner[2] , intersection_pts[4].y - camera_inner[5] , f_average;
+    main_pt << 0 , 0 , f_average;
+    vanishing_pt1 << intersection_pts[0].x - camera_inner[2] , intersection_pts[0].y - camera_inner[5] , f_average;
+    vanishing_pt2 << intersection_pts[1].x - camera_inner[2] , intersection_pts[1].y - camera_inner[5] , f_average;//光心在空间坐标系当中与主点重合，所以把相平面坐标系转化到相机坐标系下的消失点如上
+
+
+    double sinbop , sinaob;
+    sinbop = main_pt.norm() * (corner_b - vanishing_pt1).norm() / (vanishing_pt1.norm() * corner_b.norm());
+    cout << main_pt.norm() << " " << (corner_b - vanishing_pt1).norm() << " " << vanishing_pt1.norm() * corner_b.norm();
+    sinaob = sin(acos(corner_a.dot(corner_b)/(corner_a.norm() * corner_b.norm())));
+
+    length = length_AB * sinbop / sinaob;
+
+    t_w = corner_a.normalized() * length;
+    cout << "sinbop is " << sinbop << endl;
+    cout << "sinaob is " << sinaob << endl;
+    cout << "corner_a " << corner_a.normalized() << endl;
+    cout << "length is " << length << endl;
+    return t_w;
+}
+
+//TODO:激光部分的可能直接使用激光点要相对更准确一些？但是像素如何和三维点对应，并且如果对应的话点不在同一个平面上如何进行处理呢，若果能解决这个问题可以减小激光提取的误差
 int main(int argc , char **argv)
 {
     ros::init(argc , argv , "lidarCamClib");
@@ -104,7 +179,7 @@ int main(int argc , char **argv)
     nh.param<vector<double>>("camera/camera_distortion" , dist_coeffs , vector<double>());
 
     nh.param<double>("calib/depth_weight" , depth_weight , 0.6);
-    nh.param<vector<double>>("calib/init_transform" , init_transform , vector<double>());\
+    nh.param<vector<double>>("calib/init_transform" , init_transform , vector<double>());
     nh.param<double>("calib/max_orig_lines_num" , max_orig_lines_num , 250);
     nh.param<double>("calib/max_proj_lines_num" , max_proj_lines_num , 250);
 
@@ -244,19 +319,38 @@ int main(int argc , char **argv)
     //TODO:需要修改成能够选择多条直线，然后完成3条直线确定一个正方形的代码，输入选择直线的时候要求按照一组平行线连续输入
     //Select lines that will be used in calibration manually and show them
 
-    vanishing_pts_orig = calcVanishingPoint(lines_selected_orig);
-    vanishing_pts_proj = calcVanishingPoint(lines_selected_proj);
+    intersection_pts_orig = calcIntersectionPoint(lines_selected_orig);
+    intersection_pts_proj = calcIntersectionPoint(lines_selected_proj);
     //这里已经把消失点算出来了，然后根据消失点理论分别计算外参的旋转矩阵和位置
     cout << "The vanishing points in origin image are:" << endl;
-    for(auto it = vanishing_pts_orig.begin() ; it != vanishing_pts_orig.end() ; it++)
+    for(auto it = intersection_pts_orig.begin() ; it != intersection_pts_orig.end() ; it++)
     {
         cout << *it << endl;
     }
     cout << "The vanishing point in projection image are:" << endl;
-    for(auto it = vanishing_pts_proj.begin() ; it != vanishing_pts_proj.end() ; it++)
+    for(auto it = intersection_pts_proj.begin() ; it != intersection_pts_proj.end() ; it++)
     {
         cout << *it << endl;
     }
+
+    R_w_c = calcRotation(camera_inner , intersection_pts_orig);
+    R_w_l = calcRotation(camera_inner , intersection_pts_proj);//现在都暂定的是相机内参的标定是准确的
+    R_l_c = R_w_l * (R_w_c.inverse());
+    t_w_c = calcPose(camera_inner , intersection_pts_orig , 47);
+    t_w_l = calcPose(camera_inner , intersection_pts_proj , 47);
+
+    cout << "t is " << (t_w_l[0]-t_w_c[0]) << " " <<  (t_w_l[1] - t_w_c[1]) << " " << (t_w_l[2] - t_w_c[2])  << endl;
+    cout << endl;
+    cout << t_w_l[0] << t_w_c[0] << endl;
+    cout << "rotation matrix is " << R_w_c << endl;
+
+    Eigen::AngleAxisd rotation_vector; 
+    rotation_vector = Eigen::AngleAxisd(init_transform[0] , Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(init_transform[1] , Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(init_transform[2] , Eigen::Vector3d::UnitX());
+    
+    Eigen::Matrix3d r_vec = rotation_vector.toRotationMatrix();//rotation_vector是一个罗德里格斯旋转向量，按照config文件 0-Z 1-Y 2-X的顺序给进去，但是按照rpy的顺序进行旋转，即先转x再转y、z
+    cout << "test rotation angle " << R_l_c << endl;
+    Eigen::Vector3d result_euler = (R_l_c * r_vec).eulerAngles(2 , 1 , 0);//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+    cout << "The rotation angle between lidar and camera is: " << result_euler << endl;
 
     cv::waitKey(0);
     return 0;
