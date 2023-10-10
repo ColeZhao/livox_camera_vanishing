@@ -19,6 +19,9 @@ string image_file;
 string pcd_file;
 //Path of image and PCD
 
+vector<double> Extrinsic_vector;
+Eigen::Matrix3d rotation_matrix;
+Eigen::Vector3d transform_vector;
 vector<double> camera_inner;
 vector<double> dist_coeffs;
 //Camera parameters
@@ -141,7 +144,6 @@ Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> inter
     double length = 0;
     // double f_average = (camera_inner[0] + camera_inner[4]) / 2;//平均焦距
     double f_average = 5120;
-    cout << "f_average = " << f_average << endl;
 
     Eigen::Vector3d corner_a , corner_b , main_pt , vanishing_pt1 , vanishing_pt2;
     corner_a << intersection_pts[3].x - camera_inner[2] , intersection_pts[3].y - camera_inner[5] , f_average;
@@ -153,16 +155,10 @@ Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> inter
 
     double sinbop , sinaob;
     sinbop = main_pt.norm() * (corner_b - vanishing_pt1).norm() / (vanishing_pt1.norm() * corner_b.norm());
-    cout << main_pt.norm() << " " << (corner_b - vanishing_pt1).norm() << " " << vanishing_pt1.norm() * corner_b.norm();
-    sinaob = sin(acos(corner_a.dot(corner_b)/(corner_a.norm() * corner_b.norm())));
 
     length = length_AB * sinbop / sinaob;
 
     t_w = corner_a.normalized() * length;
-    cout << "sinbop is " << sinbop << endl;
-    cout << "sinaob is " << sinaob << endl;
-    cout << "corner_a " << corner_a.normalized() << endl;
-    cout << "length is " << length << endl;
     return t_w;
 }
 
@@ -178,12 +174,14 @@ int main(int argc , char **argv)
     nh.param<vector<double>>("camera/camera_inner" , camera_inner , vector<double>());
     nh.param<vector<double>>("camera/camera_distortion" , dist_coeffs , vector<double>());
 
+    int getMat = nh.param<vector<double>>("calib/ExtrinsicMat" , Extrinsic_vector , vector<double>());
     nh.param<double>("calib/depth_weight" , depth_weight , 0.6);
-    nh.param<vector<double>>("calib/init_transform" , init_transform , vector<double>());
+    int getAngle = nh.param<vector<double>>("calib/init_transform" , init_transform , {0 , 0 , 0 , 0 , 0 , 0});
     nh.param<double>("calib/max_orig_lines_num" , max_orig_lines_num , 250);
     nh.param<double>("calib/max_proj_lines_num" , max_proj_lines_num , 250);
 
-    // cout << "test" << endl;
+    rotation_matrix << Extrinsic_vector[0] , Extrinsic_vector[1] , Extrinsic_vector[2] , Extrinsic_vector[4] , Extrinsic_vector[5] , Extrinsic_vector[6] ,Extrinsic_vector[8] , Extrinsic_vector[9] , Extrinsic_vector[10];
+    transform_vector << Extrinsic_vector[3] , Extrinsic_vector[7] , Extrinsic_vector[11];
 
     // while(cin >> label_test)
     // {
@@ -196,6 +194,9 @@ int main(int argc , char **argv)
     // cin.ignore(10, '\n'); // cin无限制输入测试
     //Read the param form config file.
     // TODO:替换后续的输入，变成可以输入任意数量直线
+
+
+
 
     cv::Mat image_orig = cv::imread(image_file , cv::IMREAD_UNCHANGED);
     cv::Mat image_gray;
@@ -253,7 +254,14 @@ int main(int argc , char **argv)
     test.k3 = dist_coeffs[4];
     test.depth_weight = depth_weight;
     test_vector << init_transform[0] , init_transform[1] , init_transform[2] , init_transform[3] , init_transform[4] , init_transform[5];
-    test_mat = test.getProjectionImage(test_vector);
+    if(getAngle)
+    {
+        test_mat = test.getProjectionImage(test_vector);
+    }
+    else if(getMat)
+    {
+        test_mat = test.getProjectionImage(rotation_matrix , transform_vector);
+    }
     //Load PCD file and get projection image of it
 
     cv::medianBlur(test_mat , test_mat , 3);
@@ -336,21 +344,24 @@ int main(int argc , char **argv)
     R_w_c = calcRotation(camera_inner , intersection_pts_orig);
     R_w_l = calcRotation(camera_inner , intersection_pts_proj);//现在都暂定的是相机内参的标定是准确的
     R_l_c = R_w_l * (R_w_c.inverse());
+
+    Eigen::Matrix3d result_matrix = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+
+    if(getAngle)
+    {
+        Eigen::Vector3d result_euler = result_matrix.eulerAngles(2 , 1 , 0);
+        cout << "The rotation angle between lidar and camera is: " << result_euler << endl;
+    }
+    else if(getMat)
+    {
+        cout << "The rotation angle between lidar and camera is: " << result_matrix << endl;
+    }
+
     t_w_c = calcPose(camera_inner , intersection_pts_orig , 47);
     t_w_l = calcPose(camera_inner , intersection_pts_proj , 47);
-
-    cout << "t is " << (t_w_l[0]-t_w_c[0]) << " " <<  (t_w_l[1] - t_w_c[1]) << " " << (t_w_l[2] - t_w_c[2])  << endl;
-    cout << endl;
-    cout << t_w_l[0] << t_w_c[0] << endl;
-    cout << "rotation matrix is " << R_w_c << endl;
-
-    Eigen::AngleAxisd rotation_vector; 
-    rotation_vector = Eigen::AngleAxisd(init_transform[0] , Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(init_transform[1] , Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(init_transform[2] , Eigen::Vector3d::UnitX());
+    t_l_c = t_w_l - t_w_c;
+    cout << "transform vector between lidar and camera is " << transform_vector + t_l_c << endl;
     
-    Eigen::Matrix3d r_vec = rotation_vector.toRotationMatrix();//rotation_vector是一个罗德里格斯旋转向量，按照config文件 0-Z 1-Y 2-X的顺序给进去，但是按照rpy的顺序进行旋转，即先转x再转y、z
-    cout << "test rotation angle " << R_l_c << endl;
-    Eigen::Vector3d result_euler = (R_l_c * r_vec).eulerAngles(2 , 1 , 0);//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
-    cout << "The rotation angle between lidar and camera is: " << result_euler << endl;
 
     cv::waitKey(0);
     return 0;
