@@ -1,5 +1,5 @@
-image_file: "/home/collar/data/3.png"
-pcd_file: "/home/collar/data/3.pcd"
+image_file: "/home/collar/data/2.png"
+pcd_file: "/home/collar/data/2.pcd"
 
 camera:
     camera_inner: [1196.4418565730384, 0.0,      717.7188725924585,
@@ -8,12 +8,13 @@ camera:
     camera_distortion: [-0.09416244866122019, -0.09416244866122019, -0.00018055391689027767, -3.122884805295416e-05, 0.0]
 
 calib:
-    depth_weight: 0.3
-    ExtrinsicMat: [-0.0192034 , -1.00006 , 0.00430898 , -0.0178753 ,
-                   -0.201594 , -0.0763993  , -0.972066, -0.00202088 ,
-                   0.97944 , -0.00801681  , -0.201112 , 0.0381035 ,
+    depth_weight: 0.5
+    ExtrinsicMat: [-0 , -1 , 0.0 , -0.0 ,
+                   -0 , -0.0  , -1, -0.0 ,
+                   1.0 , -0.0  , -0.0 , 0.0,
                    0.0 , 0.0 , 0.0 , 1.0 ]
-    #init_transform: [1.37502 , -1.59457 , 0.191213 , 0.0653545 , 0.0706324 , -0.05] #这个初始化的外参是 lidar to camera的 ， 以lidar为参考转化到camera坐标系下
+    # init_transform: [1.37502 , -1.59457 , 0.191213 , 0.0653545 , 0.0706324 , -0.05] #这个初始化的外参是 lidar to camera的 ， 以lidar为参考转化到camera坐标系下
+    # init_transform: [1.41831 , -0.866233 , -0.478737 , 0.0653545 , 0.0706324 , -0.05]
     max_orig_lines_num: 250
     max_proj_lines_num: 250
 

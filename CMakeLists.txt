@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Eigen3)
 find_package(OpenCV)
 find_package(PCL REQUIRED)
+find_package(Ceres REQUIRED)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
@@ -39,5 +40,6 @@ target_link_libraries(${PROJECT_NAME}_test
   ${Eigen3_LIBS}
   ${OpenCV_LIBS}
   ${PCL_LIBS}
+  ${CERES_LIBRARIES}
 )
 

@@ -61,6 +61,9 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
     std::vector<cv::Point3f> pts_3d;
     std::vector<float> intensity_list;
     Eigen::AngleAxisd rotation_vector;
+    double max_depth_pt = 0;
+    double max_intensity_pt = 0;
+
     rotation_vector = Eigen::AngleAxisd(extrinsic_params[0] , Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(extrinsic_params[1] , Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(extrinsic_params[2] , Eigen::Vector3d::UnitX());
 
     for(u_int32_t i = 0 ; i < lidar_cloud->size() ; i++)
@@ -71,7 +74,14 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
         {
             pts_3d.emplace_back(cv::Point3f(point_3d.x , point_3d.y , point_3d.z));
             intensity_list.emplace_back(lidar_cloud->points[i].intensity);//对点进行筛选，对应的位置和强度打入堆栈当中
-            
+            if(depth > max_depth_pt)
+            {
+                max_depth_pt = depth;
+            }
+            if(point_3d.intensity > max_intensity_pt)
+            {
+                max_intensity_pt = point_3d.intensity;
+            }
             test_num++;
         }
     }
@@ -99,22 +109,22 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
         }
         else
         {
-            float depth = sqrt(pow(pts_3d[i].x, 2) + pow(pts_3d[i].y, 2) +pow(pts_3d[i].z, 2));//TODO：而且这里算了两次，要简化一下，这里的深度有一些问题，应该是按照相机点的深度进行投影，这里也是具有误差的
+            float depth = sqrt(pow(pts_3d[i].x - extrinsic_params[3] , 2) + pow(pts_3d[i].y - extrinsic_params[4], 2) +pow(pts_3d[i].z - extrinsic_params[5], 2));//TODO：而且这里算了两次，要简化一下，这里的深度有一些问题，应该是按照相机点的深度进行投影，这里也是具有误差的
             float intensity = intensity_list[i];
-            float gray = depth_weight * depth / max_depth * 65535 + (1 - depth_weight) * intensity / 150 * 65535;//这个gray和
+            float gray = depth_weight * depth / max_depth_pt * 65535 + (1 - depth_weight) * intensity / max_intensity_pt * 65535;//这个gray和
             if(image_project.at<ushort>(point_2d.y, point_2d.x) == 0 || depth < image_project.at<ushort>(point_2d.y, point_2d.x))
             {
                 image_project.at<ushort>(point_2d.y, point_2d.x) = gray;
-                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[0] = depth / max_depth * 255;
-                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[1] = intensity / 150 * 255;
+                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[0] = depth / max_depth_pt * 255;
+                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[1] = intensity / max_intensity_pt * 255;
             }
         }
     }
     image_project.convertTo(image_project, CV_8UC1, 1 / 256.0);
-    for(int i = 0 ; i < 5 ; i++)
-    {
-        image_project = fillImg(image_project);
-    }
+    // for(int i = 0 ; i < 5 ; i++)
+    // {
+    //     image_project = fillImg(image_project);
+    // }
     //这个fill_img可能需要修改一下
     projection_img = image_project.clone();
     pts_3d.clear();
@@ -127,7 +137,8 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
     std::vector<cv::Point3f> pts_3d;
     std::vector<float> intensity_list;
     Eigen::AngleAxisd rotation_vector(rotation_matrix);
-
+    double max_depth_pt = 0;
+    double max_intensity_pt = 0;
     for(u_int32_t i = 0 ; i < lidar_cloud->size() ; i++)
     {
         pcl::PointXYZI point_3d = lidar_cloud->points[i];
@@ -136,10 +147,18 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
         {
             pts_3d.emplace_back(cv::Point3f(point_3d.x , point_3d.y , point_3d.z));
             intensity_list.emplace_back(lidar_cloud->points[i].intensity);//对点进行筛选，对应的位置和强度打入堆栈当中
-            
+            if(depth > max_depth_pt)
+            {
+                max_depth_pt = depth;
+            }
+            if(point_3d.intensity > max_intensity_pt)
+            {
+                max_intensity_pt = point_3d.intensity;
+            }
             test_num++;
         }
     }
+    cout << "max max max " << max_depth_pt << " " << max_intensity_pt << endl;
     cv::Mat camera_matrix = (cv::Mat_<double>(3 , 3) << fx , 0.0 , cx , 0.0 , fy , cy , 0.0 , 0.0 , 1.0); 
 
     cv::Mat distortion_coeff = (cv::Mat_<double>(1 , 5) << k1 , k2 , p1 , p2 , k3);//用于投影的相机内参
@@ -164,24 +183,24 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
         }
         else
         {
-            float depth = sqrt(pow(pts_3d[i].x, 2) + pow(pts_3d[i].y, 2) +pow(pts_3d[i].z, 2));//TODO：而且这里算了两次，要简化一下，这里的深度有一些问题，应该是按照相机点的深度进行投影，这里也是具有误差的
+            float depth = sqrt(pow(pts_3d[i].x - transform_vector[0] , 2) + pow(pts_3d[i].y - transform_vector[1], 2) +pow(pts_3d[i].z - transform_vector[2], 2));//TODO：而且这里算了两次，要简化一下，这里的深度有一些问题，应该是按照相机点的深度进行投影，这里也是具有误差的
             float intensity = intensity_list[i];
-            float gray = depth_weight * depth / max_depth * 65535 + (1 - depth_weight) * intensity / 150 * 65535;//这个gray和
+            float gray = depth_weight * depth / max_depth_pt * 65535 + (1 - depth_weight) * intensity / max_intensity_pt * 65535;//这个gray和
             if(image_project.at<ushort>(point_2d.y, point_2d.x) == 0 || depth < image_project.at<ushort>(point_2d.y, point_2d.x))
             {
                 image_project.at<ushort>(point_2d.y, point_2d.x) = gray;
-                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[0] = depth / max_depth * 255;
-                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[1] = intensity / 150 * 255;
+                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[0] = depth / max_depth_pt * 255;
+                rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[1] = intensity / max_intensity_pt * 255;
             }
         }
     }
     image_project.convertTo(image_project, CV_8UC1, 1 / 256.0);
-    for(int i = 0 ; i < 5 ; i++)
-    {
-        image_project = fillImg(image_project);
-    }
+    // for(int i = 0 ; i < 5 ; i++)
+    // {
+    //     image_project = fillImg(image_project);
+    // }
     //这个fill_img可能需要修改一下
-    projection_img = image_project.clone();
+    projection_img = image_project.clone();//对这里的depth进行优化求解
     pts_3d.clear();
     intensity_list.clear();
 };
