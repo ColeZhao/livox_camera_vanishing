@@ -151,7 +151,6 @@ cv::Point2d calcVanishingPoint(vector<cv::Vec4f> lines_calib)
 }
 
 
-
 Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> intersection_pts , double length_AB)
 {
     //TODO：同样如上需要对坐标系与坐标原点进行确定
@@ -281,56 +280,63 @@ class vanishing_calib
             Eigen::Matrix<T , 3 ,3> K_c;
             K_c << (T)1196.3 , (T)0 , (T)0 , (T)0 , (T)1196.3 , (T)0 , (T)0 , (T)0 , (T)1;
 
+            if(vanishing_pt1_orin.y() < (T)0)
+            {
+                vanishing_pt1_orin = -vanishing_pt1_orin;
+            }
+            if(vanishing_pt2_orin.x() > (T)0)
+            {
+                vanishing_pt2_orin = -vanishing_pt2_orin;
+            }
+
             R_w_1 = (K_c.inverse() * vanishing_pt1_orin).normalized();
             R_w_2 = (K_c.inverse() * vanishing_pt2_orin).normalized();//目前看来两种表述方法获得的结果是一致的
             R_w_3 = (R_w_1.cross(R_w_2)).normalized();
-            // cout << "RW1" << R_w_1 << endl;
-            // cout << "RW2" << R_w_2 << endl;
+
             R_w << R_w_1 , R_w_2 , R_w_3;
             r_w_c = R_w.transpose();
-
+            // cout << r_w_c << endl;
             r_w_l = q_incre.toRotationMatrix() * r_w_c;
-            // cout << "rwc" << r_w_c << endl;
+            // cout << "rwl" << r_w_l << endl;
 
-            if(r_w_l(0 , 2) < (T)0)
+            // if(r_w_l(0 , 2)  < (T)0)
+            // {
+            //     vanishing_pt1_proj1(0) = -r_w_l.coeffRef(0 , 0) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
+            //     vanishing_pt1_proj1(1) = -r_w_l.coeffRef(0 , 1) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
+            //     vanishing_pt1_proj1(2) = (T)1;
+            // }
+            // else if(r_w_l(0 , 2) > (T)0)
             {
-                vanishing_pt1_proj1(0) = -r_w_l(0 , 0) * ((T)1 / r_w_l(0 , 2));
-                vanishing_pt1_proj1(1) = -r_w_l(0 , 1) * ((T)1 / r_w_l(0 , 2));
-                vanishing_pt1_proj1(2) = (T)1;
+                vanishing_pt1_proj1[0] = r_w_l.coeffRef(0 , 0) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
+                vanishing_pt1_proj1[1] = r_w_l.coeffRef(0 , 1) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
+                vanishing_pt1_proj1[2] = (T)1;
             }
-            else if(r_w_l(0 , 2) > (T)0)
+            // if(r_w_l(1 , 2) < (T)0)
+            // {
+            //     vanishing_pt2_proj1(0) = -r_w_l.coeffRef(1 , 0) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
+            //     vanishing_pt2_proj1(1) = -r_w_l.coeffRef(1 , 1) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
+            //     vanishing_pt2_proj1(2) = (T)1;
+            // }
+            // else if(r_w_l(1 , 2) > (T)0)
             {
-                vanishing_pt1_proj1(0) = r_w_l(0 , 0) * ((T)1 / r_w_l(0 , 2));
-                vanishing_pt1_proj1(1) = r_w_l(0 , 1) * ((T)1 / r_w_l(0 , 2));
-                vanishing_pt1_proj1(2) = (T)1;
+                vanishing_pt2_proj1[0] = r_w_l.coeffRef(1 , 0) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
+                vanishing_pt2_proj1[1] = r_w_l.coeffRef(1 , 1) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
+                vanishing_pt2_proj1[2] = (T)1;
             }
-            if(r_w_l(1 , 2) < (T)0)
-            {
-                vanishing_pt2_proj1(0) = -r_w_l(1 , 0) * ((T)1 / r_w_l(1 , 2));
-                vanishing_pt2_proj1(1) = -r_w_l(1 , 1) * ((T)1 / r_w_l(1 , 2));
-                vanishing_pt2_proj1(2) = (T)1;
-            }
-            else if(r_w_l(1 , 2) > (T)0)
-            {
-                vanishing_pt2_proj1(0) = r_w_l(1 , 0) * ((T)1 / r_w_l(1 , 2));
-                vanishing_pt2_proj1(1) = r_w_l(1 , 1) * ((T)1 / r_w_l(1 , 2));
-                vanishing_pt2_proj1(2) = (T)1;
-            }
+            vanishing_pt1_proj1 = K_c * vanishing_pt1_proj1;
+            vanishing_pt2_proj1 = K_c * vanishing_pt2_proj1;
             residuals[0] = (vanishing_pt1_proj(0) - vanishing_pt1_proj1(0));
             residuals[1] = (vanishing_pt1_proj(1) - vanishing_pt1_proj1(1));
             residuals[2] = (vanishing_pt2_proj(0) - vanishing_pt2_proj1(0));
-            residuals[3] = vanishing_pt2_proj(1) - vanishing_pt2_proj1(1);
-            cout << "proj pt " << vanishing_pt1_proj << endl;
-            cout << "proj1 pt " <<vanishing_pt1_proj1 << endl;
-            
-            // residuals[0] = (T)(scale_orin[0] - scale_orin[1]) - (scale_project[0] - scale_project[1]);
-            // residuals[1] = (T)(scale_orin[0] - scale_orin[2]) - (scale_project[0] - scale_project[2]);
-            // residuals[2] = (T)(vd.pts_orin[0].y - vd.pts_orin[1].y)/(vd.pts_orin[0].x - vd.pts_orin[1].x) - (vd.pts_project[0].y - vd.pts_project[1].y) / (vd.pts_project[0].x - vd.pts_project[1].x);
+            residuals[3] = (vanishing_pt2_proj(1) - vanishing_pt2_proj1(1));
+            residuals[3] = ((T)1 - sqrt(pow(r_w_l(0 , 0) , 2) + pow(r_w_l(0 , 1) , 2) + pow(r_w_l(0 , 2) , 2))) * (T)1000;
+            residuals[4] = ((T)1 - sqrt(pow(r_w_l(1 , 0) , 2) + pow(r_w_l(1 , 1) , 2) + pow(r_w_l(1 , 2) , 2))) * (T)1000;
+
             return true;
         }
         static ceres::CostFunction *Create(vanishingData v_pts)
         {
-            return (new ceres::AutoDiffCostFunction<vanishing_calib , 4 , 4 , 3>(new vanishing_calib(v_pts)));
+            return (new ceres::AutoDiffCostFunction<vanishing_calib , 5 , 4 , 3>(new vanishing_calib(v_pts)));
         }//这里实际上是把阿auto difference放在了类里面进行定义
     private:
         vanishingData vd;
@@ -395,22 +401,8 @@ int main(int argc , char **argv)
     cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(40.0, cv::Size(5, 5));
     clahe->apply(image_gray, image_gray);
     // cv::medianBlur(image_gray , image_gray , 3);//不做中值滤波因该能够更好保证图像的原始几何特征
-
-
+    
     lsd->detect(image_gray , lines_lsd_orig );
-
-
-
-    // cv::Mat canny_image;
-    // cv::Canny(image_gray , canny_image , 40 , 255);
-
-    // vector<cv::Vec4f> hough_lines;
-    // cv::HoughLinesP(canny_image , hough_lines , 1 , CV_PI/180 , 10 , 30 , 5);
-    // lsd->drawSegments(image_gray , hough_lines);
-    // cv::imshow("image_canny" , image_gray);
-    // cv::waitKey(100);
-
-    // lines_lsd_orig = hough_lines;
 
     sort(lines_lsd_orig.begin() , lines_lsd_orig.end() , sort_lines_by_length());
     lines_lsd_orig.resize(max_proj_lines_num);
@@ -444,6 +436,7 @@ int main(int argc , char **argv)
     if(getAngle)
     {
         test_mat = test.getProjectionImage(test_vector);
+        cout << " get angle!";
     }
     else if(getMat)
     {
@@ -483,40 +476,40 @@ int main(int argc , char **argv)
     }
     cout << endl;
     //选择用于消失点计算的辅助直线
-    cout << "Please enter how many auxiliary lines in first direction to selected in origin image." << endl;
-    cin >> auxiliary_num;
-    for(int i = 0 ; i < auxiliary_num ; i++)
-    {
-        cin >> label_line_selected;
-        label_lines_auxiliary_orig1.emplace_back(label_line_selected);
-    }
-    cout << "Please selected lines." << endl;
-    lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(0));
-    lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(1));
-    for(auto it = label_lines_auxiliary_orig1.begin() ; it != label_lines_auxiliary_orig1.end() ; ++it)
-    {
-        lines_auxiliary_orig1.emplace_back(lines_lsd_orig[*it]);
-        cout << *it << " ";
-    }
-    cout << endl;
+    // cout << "Please enter how many auxiliary lines in first direction to selected in origin image." << endl;
+    // cin >> auxiliary_num;
+    // for(int i = 0 ; i < auxiliary_num ; i++)
+    // {
+    //     cin >> label_line_selected;
+    //     label_lines_auxiliary_orig1.emplace_back(label_line_selected);
+    // }
+    // cout << "Please selected lines." << endl;
+    // lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(0));
+    // lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(1));
+    // for(auto it = label_lines_auxiliary_orig1.begin() ; it != label_lines_auxiliary_orig1.end() ; ++it)
+    // {
+    //     lines_auxiliary_orig1.emplace_back(lines_lsd_orig[*it]);
+    //     cout << *it << " ";
+    // }
+    // cout << endl;
 
-    cout << "Please enter how many auxiliary lines in second direction to selected in  origin image." << endl;
-    cin >> auxiliary_num;
-    cout << "111111" << endl;
-    for(int i = 0 ; i < auxiliary_num ; i++)
-    {
-        cin >> label_line_selected;
-        label_lines_auxiliary_orig2.emplace_back(label_line_selected);
-    }
-    cout << "Please selected lines." << endl;
-    lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(2));
-    lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(3));
-    for(auto it = label_lines_auxiliary_orig2.begin() ; it != label_lines_auxiliary_orig2.end() ; ++it)
-    {
-        lines_auxiliary_orig2.emplace_back(lines_lsd_orig[*it]);
-        cout << *it << " ";
-    }
-    cout << endl;
+    // cout << "Please enter how many auxiliary lines in second direction to selected in  origin image." << endl;
+    // cin >> auxiliary_num;
+    // cout << "111111" << endl;
+    // for(int i = 0 ; i < auxiliary_num ; i++)
+    // {
+    //     cin >> label_line_selected;
+    //     label_lines_auxiliary_orig2.emplace_back(label_line_selected);
+    // }
+    // cout << "Please selected lines." << endl;
+    // lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(2));
+    // lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(3));
+    // for(auto it = label_lines_auxiliary_orig2.begin() ; it != label_lines_auxiliary_orig2.end() ; ++it)
+    // {
+    //     lines_auxiliary_orig2.emplace_back(lines_lsd_orig[*it]);
+    //     cout << *it << " ";
+    // }
+    // cout << endl;
 
     lsd->drawSegments(image_gray , lines_selected_orig);
     for(int i = 0 ; i < lines_selected_orig.size() ; ++i)
@@ -540,6 +533,42 @@ int main(int argc , char **argv)
         cout << *it << " ";
     }
     cout << endl;
+
+    //选择投影图像用于消失点计算的辅助直线
+    // cout << "Please enter how many auxiliary lines in first direction to selected in projection image." << endl;
+    // cin >> auxiliary_num;
+    // for(int i = 0 ; i < auxiliary_num ; i++)
+    // {
+    //     cin >> label_line_selected;
+    //     label_lines_auxiliary_proj1.emplace_back(label_line_selected);
+    // }
+    // cout << "Please selected lines." << endl;
+    // lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(0));
+    // lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(1));
+    // for(auto it = label_lines_auxiliary_proj1.begin() ; it != label_lines_auxiliary_proj1.end() ; ++it)
+    // {
+    //     lines_auxiliary_proj1.emplace_back(lines_lsd_proj[*it]);
+    //     cout << *it << " ";
+    // }
+    // cout << endl;
+
+    // cout << "Please enter how many auxiliary lines in second direction to selected in projection image." << endl;
+    // cin >> auxiliary_num;
+    // for(int i = 0 ; i < auxiliary_num ; i++)
+    // {
+    //     cin >> label_line_selected;
+    //     label_lines_auxiliary_proj2.emplace_back(label_line_selected);
+    // }
+    // cout << "Please selected lines." << endl;
+    // lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(2));
+    // lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(3));
+    // for(auto it = label_lines_auxiliary_proj2.begin() ; it != label_lines_auxiliary_proj2.end() ; ++it)
+    // {
+    //     lines_auxiliary_proj2.emplace_back(lines_lsd_proj[*it]);
+    //     cout << *it << " ";
+    // }
+    // cout << endl;
+
 
     project_lsd->drawSegments(test_mat , lines_selected_proj);
     for(int i = 0 ; i < lines_selected_proj.size() ; ++i)
@@ -571,7 +600,8 @@ int main(int argc , char **argv)
     cout << "rc" << R_w_c << endl;
     cout << "rl" << R_w_l << endl;
 
-    Eigen::Matrix3d result_matrix = R_l_c.inverse() * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+    // Eigen::Matrix3d result_matrix = R_l_c.inverse() * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+    Eigen::Matrix3d result_matrix = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
 
     if(getAngle)
     {
@@ -583,60 +613,37 @@ int main(int argc , char **argv)
         cout << "The rotation angle between lidar and camera is: " << result_matrix << endl;
     }
 
-    t_c_w = calcPose(camera_inner , intersection_pts_orig , 47);
-    t_l_w = calcPose(camera_inner , intersection_pts_proj , 47);
+    t_c_w = calcPose(camera_inner , intersection_pts_orig , 60);
+    t_l_w = calcPose(camera_inner , intersection_pts_proj , 60);
     cout << " r_l_c is " << R_l_c  << endl; 
     t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
     cout << t_l_w;
     t_l_c = t_c_w - t_l_w;
     cout << "transform vector between lidar and camera is " << transform_vector + t_l_c << endl;
-
-
-    /*使用ceres进行优化方法的外参矩阵求解*/
-    int optimize_time = 1;
-    Eigen::Quaterniond q_opt(rotation_matrix);
-    double ext[7];
-    ext[0] = q_opt.x();
-    ext[1] = q_opt.y();
-    ext[2] = q_opt.z();
-    ext[3] = q_opt.w();
-    ext[4] = transform_vector[0];
-    ext[5] = transform_vector[1];
-    ext[6] = transform_vector[2];
-    Eigen::Map<Eigen::Quaterniond> m_q = Eigen::Map<Eigen::Quaterniond>(ext);
-    vanishingData vanishing_pts;
-    vanishing_pts.pts_orin = intersection_pts_orig;
-    vanishing_pts.pts_project = intersection_pts_proj;
-    for(int i = 0 ; i < optimize_time ; i++);
-    {
-        ceres::LocalParameterization * q_parameterization = new ceres::EigenQuaternionParameterization();
-        ceres::Problem problem;
-
-        ceres::CostFunction *cost_function;
-        cost_function = vanishing_calib::Create(vanishing_pts);
-        problem.AddResidualBlock(cost_function , NULL , ext , ext + 4);
-        ceres::Solver::Options options;
-        options.preconditioner_type = ceres::JACOBI;
-        options.linear_solver_type = ceres::SPARSE_SCHUR;
-        options.minimizer_progress_to_stdout = true;
-        options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
-        options.max_num_iterations = 500;
-        ceres::Solver::Summary summary;
-        ceres::Solve(options, &problem, &summary);
-        std::cout << summary.BriefReport() << std::endl;
-        cout << m_q.toRotationMatrix() << endl;
-    }
-    cout << "the end result: " << m_q.toRotationMatrix().inverse() * rotation_matrix << endl;
     
     
     /*使用辅助直线进行单帧里面某一组消失点的求解*/
-    // vector<cv::Point2d> test_pts;
+    // vector<cv::Point2d> test_pts1 , test_pts2;
     // cv::Point2d test_point = calcVanishingPoint(lines_auxiliary_orig1);
-    // test_pts.emplace_back(test_point);
+    // test_pts1.emplace_back(test_point);
     // test_point = calcVanishingPoint(lines_auxiliary_orig2);
-    // test_pts.emplace_back(test_point);
-    // cout << test_pts << endl;
-    // R_w_c = calcRotation(camera_inner , test_pts);
+    // test_pts1.emplace_back(test_point);
+    // test_point = calcVanishingPoint(lines_auxiliary_proj1);
+    // test_pts2.emplace_back(test_point);
+    // test_point = calcVanishingPoint(lines_auxiliary_proj2);
+    // test_pts2.emplace_back(test_point);
+    // cout << test_pts1 << endl;
+    // cout << test_pts2 << endl;
+
+
+    // R_w_c = calcRotation(camera_inner , test_pts1);
+    // R_w_l = calcRotation(camera_inner , test_pts2);
+    // R_l_c = R_w_l * (R_w_c.inverse());
+
+    // cout << "rc_au" << R_w_c << endl;
+    // cout << "rl_au" << R_w_l << endl;
+    // result_matrix = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+    // cout << "test matrix au: " << result_matrix << endl;
     // cout << "R_w_c" << R_w_c <<  endl;
     // cout << R_w_c * R_w_c.transpose() << endl;
     // cout << "R_w_l" << R_w_l << endl;
@@ -647,7 +654,6 @@ int main(int argc , char **argv)
 
     // result_matrix = R_l_c.inverse() * rotation_matrix;
 
-    // cout << "test matrix : " << result_matrix << endl;
 
     cv::waitKey(0);
     return 0;
