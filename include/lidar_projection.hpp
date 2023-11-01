@@ -151,7 +151,6 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
             test_num++;
         }
     }
-    cout << "max max max " << max_depth_pt << " " << max_intensity_pt << endl;
     cv::Mat camera_matrix = (cv::Mat_<double>(3 , 3) << fx , 0.0 , cx , 0.0 , fy , cy , 0.0 , 0.0 , 1.0); 
 
     cv::Mat distortion_coeff = (cv::Mat_<double>(1 , 5) << k1 , k2 , p1 , p2 , k3);//用于投影的相机内参
@@ -201,7 +200,6 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
 cv::Mat LidarProjection::getProjectionImage(const Vector6d &extrinsic_params)
 {
     cv::Mat projection_img;
-    cout << height * width << endl;
     projection(extrinsic_params , lidar_orig_cloud , projection_img);
     return projection_img;
 };
@@ -209,7 +207,6 @@ cv::Mat LidarProjection::getProjectionImage(const Vector6d &extrinsic_params)
 cv::Mat LidarProjection::getProjectionImage(const Eigen::Matrix3d &rotation_matrix , const Eigen::Vector3d &transform_vector)
 {
     cv::Mat projection_img;
-    cout << height * width << endl;
     projection(rotation_matrix , transform_vector , lidar_orig_cloud , projection_img);
     return projection_img;
 };

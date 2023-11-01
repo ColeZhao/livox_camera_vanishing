@@ -1,5 +1,9 @@
-image_file: "/home/collar/data/vanishing_data/1.png"
-pcd_file: "/home/collar/data/vanishing_data/1.pcd"
+frame_num: 2
+
+image_file0: "/home/collar/data/vanishing_data/1.png"
+pcd_file0: "/home/collar/data/vanishing_data/1.pcd"
+image_file1: "/home/collar/data/vanishing_data/2.png"
+pcd_file1: "/home/collar/data/vanishing_data/2.pcd"
 
 camera:
     camera_inner: [1196.4418565730384, 0.0,      717.7188725924585,

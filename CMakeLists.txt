@@ -33,9 +33,18 @@ include_directories(
   ${PCL_INCLUDE_DIRS}
 )
 
-add_executable(${PROJECT_NAME}_test src/livox_camera_vanishing_node.cpp include/lidar_projection.hpp)
+add_executable(vanishing_calib src/livox_camera_vanishing_node.cpp include/lidar_projection.hpp)
+add_executable(vanishing_calib_multi_group src/livox_camera_vanishing_multi_group_node.cpp include/lidar_projection.hpp)
 
-target_link_libraries(${PROJECT_NAME}_test
+target_link_libraries(vanishing_calib
+  ${catkin_LIBRARIES}
+  ${Eigen3_LIBS}
+  ${OpenCV_LIBS}
+  ${PCL_LIBS}
+  ${CERES_LIBRARIES}
+)
+
+target_link_libraries(vanishing_calib_multi_group
   ${catkin_LIBRARIES}
   ${Eigen3_LIBS}
   ${OpenCV_LIBS}

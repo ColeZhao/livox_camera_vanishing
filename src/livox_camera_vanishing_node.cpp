@@ -91,6 +91,7 @@ double res_weight_sum = 0.0;
 Eigen::Matrix3d R_w_c , R_w_l , R_l_c;
 Eigen::Vector3d t_c_w , t_l_w , t_w_l , t_l_c;
 vector<Eigen::Quaterniond> q_container;
+vector<Eigen::Vector3d> t_container;
 
 struct sort_lines_by_length
 {   //根据特征直线的长度进行排序
@@ -264,10 +265,11 @@ Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> inter
 //TODO:激光部分的可能直接使用激光点要相对更准确一些？但是像素如何和三维点对应，并且如果对应的话点不在同一个平面上如何进行处理呢，若果能解决这个问题可以减小激光提取的误差
 int main(int argc , char **argv)
 {
+    /*读取config文件里面的参数*/
     ros::init(argc , argv , "lidarCamClib");
     ros::NodeHandle nh;
 
-    nh.param<string>("image_file" , image_file , "");
+    nh.param<string>(image_file , image_file , "");
     nh.param<string>("pcd_file" , pcd_file ,"");
 
     nh.param<vector<double>>("camera/camera_inner" , camera_inner , vector<double>());
@@ -306,12 +308,22 @@ int main(int argc , char **argv)
     }
     //Load the image
 
+    pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_point_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
+    if(pcl::io::loadPCDFile(pcd_file , *lidar_point_cloud) == -1)
+    {
+        ROS_ERROR("Failed load PCD file.");
+        exit(1);
+    }
+    else
+    {
+        ROS_INFO("Load PCD file sucessfully!");
+    }
+    //Load the PCD file
+
     cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(40.0, cv::Size(5, 5));
-    clahe->apply(image_gray, image_gray);
-    // cv::medianBlur(image_gray , image_gray , 3);//不做中值滤波因该能够更好保证图像的原始几何特征
+    clahe->apply(image_gray, image_gray);//直方图均衡化做了图像增强
 
     lsd->detect(image_gray , lines_lsd_orig );
-
     sort(lines_lsd_orig.begin() , lines_lsd_orig.end() , sort_lines_by_length());
     lines_lsd_orig.resize(max_proj_lines_num);
     cv::Mat lsd_orig_gray = image_gray.clone();
@@ -324,6 +336,51 @@ int main(int argc , char **argv)
     cv::waitKey(100);
     //Detect lines in image and show them
 
+    LidarProjection test(lidar_point_cloud);
+    Vector6d test_vector;
+    cv::Mat test_mat;
+    
+    test.width = image_gray.size().width;
+    test.height = image_gray.size().height;
+    test.fx = camera_inner[0];
+    test.fy = camera_inner[4];
+    test.cx = camera_inner[2];
+    test.cy = camera_inner[5];
+    test.k1 = dist_coeffs[0];
+    test.k2 = dist_coeffs[1];
+    test.p1 = dist_coeffs[2];
+    test.p2 = dist_coeffs[3];
+    test.k3 = dist_coeffs[4];
+    test.depth_weight = depth_weight;
+    test_vector << init_transform[0] , init_transform[1] , init_transform[2] , init_transform[3] , init_transform[4] , init_transform[5];
+    if(getAngle)
+    {
+        test_mat = test.getProjectionImage(test_vector);
+        cout << " get angle!";
+    }
+    else if(getMat)
+    {
+        test_mat = test.getProjectionImage(rotation_matrix , transform_vector);
+    }
+
+    cv::medianBlur(test_mat , test_mat , 3);
+    cv::fastNlMeansDenoising(test_mat , test_mat);//
+    project_lsd->detect(test_mat , lines_lsd_proj);
+    sort(lines_lsd_proj.begin() , lines_lsd_proj.end() , sort_lines_by_length());
+    lines_lsd_proj.resize(max_proj_lines_num);
+    cv::Mat lsd_proj_gray = test_mat.clone();
+    project_lsd->drawSegments(lsd_proj_gray , lines_lsd_proj);
+    for(int i = 0 ; i < lines_lsd_proj.size() ; ++i)
+    {
+        cv::putText(lsd_proj_gray , to_string(i) , cv::Point((lines_lsd_proj[i](0) + lines_lsd_proj[i](2)) / 2 , (lines_lsd_proj[i](1) + lines_lsd_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+    }
+    cv::imshow("projection_test" , lsd_proj_gray);
+    cv::waitKey(1000);
+    //Detect lines in projection image and show them
+
+/************************************************************************************/
+    label_lines_selected_orig.clear();
+    lines_selected_orig.clear();
     /*选取原始图像上的一组正交直线*/
     cout << "Please select 1 sets of lines in origin image." << endl;
     for(int i = 0 ; i < 4 ; i++)
@@ -347,20 +404,10 @@ int main(int argc , char **argv)
     }
     cv::imshow("lsd image selected" , image_gray);
     cv::waitKey(100);
-
     intersection_pts_orig = calcIntersectionPoint(lines_selected_orig);
 
-#if calcResiduals
-    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[3]).y , 2));
-    triangle_ori.emplace_back(residuals_tmp);
-    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[4]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[4]).y , 2));
-    triangle_ori.emplace_back(residuals_tmp);
-    residuals_tmp = sqrt(pow((intersection_pts_orig[4] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[4] - intersection_pts_orig[3]).y , 2));
-    triangle_ori.emplace_back(residuals_tmp);
-#endif
-
 #if useAuxiliaryLines
-    // 选择用于消失点计算的辅助直线
+    // Calculate the intersection points and vanishing points with auxiliary lines.
     cout << "Please enter how many auxiliary lines in first direction to selected in origin image." << endl;
     cin >> auxiliary_num;
     cout << "Please selected lines." << endl;
@@ -402,69 +449,21 @@ int main(int argc , char **argv)
     cout << "The intersection points in origin image are:" << endl;
     cout << intersection_pts_orig << endl;
 
+#if calcResiduals
+    // Calculate residuals to optimize the quaternion of rotation.
+    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[3]).y , 2));
+    triangle_ori.emplace_back(residuals_tmp);
+    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[4]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[4]).y , 2));
+    triangle_ori.emplace_back(residuals_tmp);
+    residuals_tmp = sqrt(pow((intersection_pts_orig[4] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[4] - intersection_pts_orig[3]).y , 2));
+    triangle_ori.emplace_back(residuals_tmp);
+#endif
 
-    R_w_c = calcRotation(camera_inner , intersection_pts_orig);//计算出了相机坐标系到选取直线目标的世界坐标系之间的转化关系
+    R_w_c = calcRotation(camera_inner , intersection_pts_orig);
     t_c_w = calcPose(camera_inner , intersection_pts_orig , 60);
+    //Get the transform matrix between camera and target object.
 
-
-
-    /*代码模块测试用*/
-    pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_point_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
-    if(pcl::io::loadPCDFile(pcd_file , *lidar_point_cloud) == -1)
-    {
-        ROS_ERROR("Failed load PCD file.");
-        exit(1);
-    }
-    else
-    {
-        ROS_INFO("Load PCD file sucessfully!");
-    }
-
-
-    LidarProjection test(lidar_point_cloud);
-    Vector6d test_vector;
-    cv::Mat test_mat;
-    
-    test.width = image_gray.size().width;
-    test.height = image_gray.size().height;
-    test.fx = camera_inner[0];
-    test.fy = camera_inner[4];
-    test.cx = camera_inner[2];
-    test.cy = camera_inner[5];
-    test.k1 = dist_coeffs[0];
-    test.k2 = dist_coeffs[1];
-    test.p1 = dist_coeffs[2];
-    test.p2 = dist_coeffs[3];
-    test.k3 = dist_coeffs[4];
-    test.depth_weight = depth_weight;
-    test_vector << init_transform[0] , init_transform[1] , init_transform[2] , init_transform[3] , init_transform[4] , init_transform[5];
-    if(getAngle)
-    {
-        test_mat = test.getProjectionImage(test_vector);
-        cout << " get angle!";
-    }
-    else if(getMat)
-    {
-        test_mat = test.getProjectionImage(rotation_matrix , transform_vector);
-    }
-    //Load PCD file and get projection image of it
-
-    cv::medianBlur(test_mat , test_mat , 3);
-    cv::fastNlMeansDenoising(test_mat , test_mat);
-    project_lsd->detect(test_mat , lines_lsd_proj);
-    sort(lines_lsd_proj.begin() , lines_lsd_proj.end() , sort_lines_by_length());
-    lines_lsd_proj.resize(max_proj_lines_num);
-    cv::Mat lsd_proj_gray = test_mat.clone();
-    project_lsd->drawSegments(lsd_proj_gray , lines_lsd_proj);
-    for(int i = 0 ; i < lines_lsd_proj.size() ; ++i)
-    {
-        cv::putText(lsd_proj_gray , to_string(i) , cv::Point((lines_lsd_proj[i](0) + lines_lsd_proj[i](2)) / 2 , (lines_lsd_proj[i](1) + lines_lsd_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-    }
-    cv::imshow("projection_test" , lsd_proj_gray);
-    cv::waitKey(1000);
-    //Detect lines in projection image and show them
-
-
+/************************************************************************************/
     while(ros::ok())
     {
         int exit_flag = 1;
@@ -483,7 +482,6 @@ int main(int argc , char **argv)
             cout << *it << " ";
         }
         cout << endl;
-
         project_lsd->drawSegments(test_mat , lines_selected_proj);
         for(int i = 0 ; i < lines_selected_proj.size() ; ++i)
         {
@@ -541,19 +539,22 @@ int main(int argc , char **argv)
         R_l_c = R_w_l * (R_w_c.inverse());
         cout << " r_l_c is " << R_l_c  << endl; 
 
-        Eigen::Matrix3d result_tmp = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
-        cout << "matrix this group is " << result_tmp;
-
-        Eigen::Quaterniond q_tmp(result_tmp);
-
         t_l_w = calcPose(camera_inner , intersection_pts_proj , 60);
         t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
-        cout << t_l_w;
         t_l_c = t_c_w - t_l_w;
-        cout << "transform vector between lidar and camera is " << transform_vector + t_l_c << endl;
+        cout << " t_l_c is " << t_l_w << endl;
+
+        Eigen::Matrix3d rotation_tmp = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+        cout << "matrix this group is " << rotation_tmp;
+        Eigen::Quaterniond q_tmp(rotation_tmp);
+
+        Eigen::Vector3d transpose_tmp = transform_vector + t_l_c;
+        cout << "transpose this group is " << transpose_tmp << endl;
+        //Get the transform matrix between lidar and target object. Then calculate the result in this group
+
 #if calcResiduals
         cv::Mat test_mat1;
-        test_mat1 = test.getProjectionImage(result_tmp , t_l_c / 100);
+        test_mat1 = test.getProjectionImage(rotation_tmp , t_l_c / 100);
 
         cv::medianBlur(test_mat1 , test_mat1 , 3);
         cv::fastNlMeansDenoising(test_mat1 , test_mat1);
@@ -568,7 +569,6 @@ int main(int argc , char **argv)
         }
         cv::imshow("projection_residuals" , lsd_proj_gray_R);
         cv::waitKey(3000);
-        //Detect lines in projection image and show them
 
         label_lines_selected_proj_R.clear();
         lines_selected_proj_R.clear();
@@ -593,7 +593,7 @@ int main(int argc , char **argv)
         {
             cv::putText(test_mat1 , to_string(label_lines_selected_proj_R[i]) , cv::Point((lines_selected_proj_R[i](0) + lines_selected_proj_R[i](2)) / 2 , (lines_selected_proj_R[i](1) + lines_selected_proj_R[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
         }
-        cv::imshow("proj image selected residuals" , test_mat);
+        cv::imshow("proj image selected residuals" , test_mat1);
         cv::waitKey(1000);
 
         intersection_pts_proj_R = calcIntersectionPoint(lines_selected_proj_R);
@@ -613,10 +613,12 @@ int main(int argc , char **argv)
 
         res_weight_sum = res_weight_sum + abs(1 / (residuals[0] * residuals[1] * residuals[2]));
         q_tmp.coeffs() = q_tmp.coeffs() * abs(1 / (residuals[0] * residuals[1] * residuals[2]));
+        transpose_tmp = transpose_tmp * abs(1 / (residuals[0] * residuals[1] * residuals[2]));
 #endif
 
 
         q_container.emplace_back(q_tmp);
+        t_container.emplace_back(transpose_tmp);
 
         cout <<"Type any key except 0 to add lines to optimize result." << endl;
         cin >> exit_flag;
@@ -631,13 +633,12 @@ int main(int argc , char **argv)
         }
     }
 
-    cout <<"Exit!" << endl;
+    ROS_INFO("Exit!");
 
     Eigen::Quaterniond q_result(0.0 , 0.0 , 0.0 , 0.0);
-    cout << q_container.size() << endl;
+    Eigen::Vector3d t_result(0.0 , 0.0 , 0.0);
     for(int i = 0 ; i < q_container.size() ; i++)
     {
-        cout << q_container[i].x() << q_container[i].y() << q_container[i].z() << q_container[i].w() << endl;
         if(q_container[i].z() < 0)
         {
             q_result.coeffs() = q_result.coeffs() - q_container[i].coeffs(); 
@@ -646,33 +647,31 @@ int main(int argc , char **argv)
         {
             q_result.coeffs() = q_result.coeffs() + q_container[i].coeffs(); 
         }
-        
-    cout << q_result.x() << q_result.y() << q_result.z() << q_result.w() << endl;
+        t_result = t_result + t_container[i];
     }
-
-    cout << q_result.x() << q_result.y() << q_result.z() << q_result.w() << endl;
 #if calcResiduals
     q_result.coeffs() = q_result.coeffs() / res_weight_sum;
+    t_result = t_result / res_weight_sum;
 #else
     q_result.coeffs() = q_result.coeffs() / (float)q_container.size();
+    t_result = t_result / (float)t_container.size();
 #endif
     q_result.normalize();
-    cout << "q_result" << endl;//做个施密特正交化
-
-    cout << q_result.x() << q_result.y() << q_result.z() << q_result.w() << endl;
-
 
     Eigen::Matrix3d result_matrix;
-    result_matrix = q_result.toRotationMatrix();
+    result_matrix = q_result.toRotationMatrix();//TODO:做个施密特正交化
     if(getAngle)
     {
         Eigen::Vector3d result_euler = result_matrix.eulerAngles(2 , 1 , 0);
-        cout << "The rotation angle between lidar and camera is: " << result_euler << endl;
+        ROS_INFO("The rotation angle between lidar and camera is: \n");
+        cout <<  result_euler << endl;
     }
     else if(getMat)
     {
-        cout << "The rotation angle between lidar and camera is: " << result_matrix << endl;
+        ROS_INFO("The rotation angle between lidar and camera is: \n");
+        cout << result_matrix << endl;
     }
+    ROS_INFO("The transpose between lidar and camera is : \n");
 
     cv::waitKey(0);
     return 0;

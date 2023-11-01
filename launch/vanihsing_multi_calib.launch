@@ -1,0 +1,9 @@
+<launch>
+  <rosparam command="load" file="$(find livox_camera_vanishing)/config/multi_config.yaml" />
+  <node 
+    pkg="livox_camera_vanishing"
+    type="vanishing_calib_multi_group"
+    name="vanishing_calib_multi_group"
+    output="screen"
+  />
+</launch>
