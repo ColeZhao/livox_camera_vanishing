@@ -18,7 +18,7 @@ typedef Eigen::Matrix<double , 6 , 1> Vector6d;
 class LidarProjection
 {
     public:
-        LidarProjection(const std::string &pcd_file);
+        LidarProjection(const pcl::PointCloud<pcl::PointXYZI>::Ptr &lidar_cloud);
         ~LidarProjection(){};
 
         ros::NodeHandle nh_;
@@ -28,6 +28,8 @@ class LidarProjection
         cv::Mat getProjectionImage(const Vector6d &extrinsic_params);
         cv::Mat getProjectionImage(const Eigen::Matrix3d &rotation_matrix , const Eigen::Vector3d &transform_vector);
         cv::Mat fillImg(const cv::Mat &input_img);
+
+        std::vector<cv::Point3f> pts_3d;
 
         pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_orig_cloud;
 
@@ -41,24 +43,15 @@ class LidarProjection
 
 };
 
-LidarProjection::LidarProjection(const std::string &pcd_file)
+LidarProjection::LidarProjection(const pcl::PointCloud<pcl::PointXYZI>::Ptr &lidar_cloud)
 {   
-    lidar_orig_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
-    if(pcl::io::loadPCDFile(pcd_file , *lidar_orig_cloud) == -1)
-    {
-        ROS_ERROR("Failed load PCD file.");
-        exit(1);
-    }
-    else
-    {
-        ROS_INFO("Load PCD file sucessfully!");
-    }
+    lidar_orig_cloud = lidar_cloud;
 };
 
 void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::PointCloud<pcl::PointXYZI>::Ptr &lidar_cloud , cv::Mat &projection_img)
 { 
     int test_num = 0;
-    std::vector<cv::Point3f> pts_3d;
+    // std::vector<cv::Point3f> pts_3d;
     std::vector<float> intensity_list;
     Eigen::AngleAxisd rotation_vector;
     double max_depth_pt = 0;
@@ -109,11 +102,11 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
         }
         else
         {
-            float depth = sqrt(pow(pts_3d[i].x - extrinsic_params[3] , 2) + pow(pts_3d[i].y - extrinsic_params[4], 2) +pow(pts_3d[i].z - extrinsic_params[5], 2));//TODO：而且这里算了两次，要简化一下，这里的深度有一些问题，应该是按照相机点的深度进行投影，这里也是具有误差的
-            float intensity = intensity_list[i];
-            float gray = depth_weight * depth / max_depth_pt * 65535 + (1 - depth_weight) * intensity / max_intensity_pt * 65535;//这个gray和
+            float depth = sqrt(pow(pts_3d[i].x - extrinsic_params[3] , 2) + pow(pts_3d[i].y - extrinsic_params[4], 2) +pow(pts_3d[i].z - extrinsic_params[5], 2));
             if(image_project.at<ushort>(point_2d.y, point_2d.x) == 0 || depth < image_project.at<ushort>(point_2d.y, point_2d.x))
             {
+                float intensity = intensity_list[i];
+                float gray = depth_weight * depth / max_depth_pt * 65535 + (1 - depth_weight) * intensity / max_intensity_pt * 65535;
                 image_project.at<ushort>(point_2d.y, point_2d.x) = gray;
                 rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[0] = depth / max_depth_pt * 255;
                 rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[1] = intensity / max_intensity_pt * 255;
@@ -134,7 +127,7 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
 void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const Eigen::Vector3d &transform_vector , const pcl::PointCloud<pcl::PointXYZI>::Ptr &lidar_cloud , cv::Mat &projection_img)
 { 
     int test_num = 0;
-    std::vector<cv::Point3f> pts_3d;
+    // std::vector<cv::Point3f> pts_3d;
     std::vector<float> intensity_list;
     Eigen::AngleAxisd rotation_vector(rotation_matrix);
     double max_depth_pt = 0;
@@ -183,11 +176,11 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
         }
         else
         {
-            float depth = sqrt(pow(pts_3d[i].x - transform_vector[0] , 2) + pow(pts_3d[i].y - transform_vector[1], 2) +pow(pts_3d[i].z - transform_vector[2], 2));//TODO：而且这里算了两次，要简化一下，这里的深度有一些问题，应该是按照相机点的深度进行投影，这里也是具有误差的
-            float intensity = intensity_list[i];
-            float gray = depth_weight * depth / max_depth_pt * 65535 + (1 - depth_weight) * intensity / max_intensity_pt * 65535;//这个gray和
+            float depth = sqrt(pow(pts_3d[i].x - transform_vector[0] , 2) + pow(pts_3d[i].y - transform_vector[1], 2) +pow(pts_3d[i].z - transform_vector[2], 2));
             if(image_project.at<ushort>(point_2d.y, point_2d.x) == 0 || depth < image_project.at<ushort>(point_2d.y, point_2d.x))
             {
+                float intensity = intensity_list[i];
+                float gray = depth_weight * depth / max_depth_pt * 65535 + (1 - depth_weight) * intensity / max_intensity_pt * 65535;
                 image_project.at<ushort>(point_2d.y, point_2d.x) = gray;
                 rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[0] = depth / max_depth_pt * 255;
                 rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[1] = intensity / max_intensity_pt * 255;
@@ -208,6 +201,7 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
 cv::Mat LidarProjection::getProjectionImage(const Vector6d &extrinsic_params)
 {
     cv::Mat projection_img;
+    cout << height * width << endl;
     projection(extrinsic_params , lidar_orig_cloud , projection_img);
     return projection_img;
 };
@@ -215,6 +209,7 @@ cv::Mat LidarProjection::getProjectionImage(const Vector6d &extrinsic_params)
 cv::Mat LidarProjection::getProjectionImage(const Eigen::Matrix3d &rotation_matrix , const Eigen::Vector3d &transform_vector)
 {
     cv::Mat projection_img;
+    cout << height * width << endl;
     projection(rotation_matrix , transform_vector , lidar_orig_cloud , projection_img);
     return projection_img;
 };

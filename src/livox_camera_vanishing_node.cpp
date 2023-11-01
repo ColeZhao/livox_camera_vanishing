@@ -10,6 +10,12 @@
 
 #include <include/lidar_projection.hpp>
 
+//TODO:尝试2D-3D对应，以计算标定直线尺寸，如果3D-2D对应实现，那么残差部分也可以进行改变
+//TODO:添加残差计算权重相关内容
+//TODO:添加单帧多标定物标定代码
+//TODO:添加多帧多标定物标定代码
+#define useAuxiliaryLines 0
+#define calcResiduals 1
 
 
 using namespace std;
@@ -20,6 +26,7 @@ string image_file;
 string pcd_file;
 //Path of image and PCD
 
+
 vector<double> Extrinsic_vector;
 Eigen::Matrix3d rotation_matrix;
 Eigen::Vector3d transform_vector;
@@ -29,17 +36,16 @@ vector<double> dist_coeffs;
 
 double depth_weight;
 vector<double> init_transform;
-
 double max_orig_lines_num , max_proj_lines_num;
 //Calibration parameters
 
-int calib_lines_sets_num = 0;
-//Number of sets that will be selected to calibrate the extrinsic parameters
 
-// cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_NONE , 0.8 , 0.6 , 1.5 , 30 , 0.0 , 0.7);
 cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 3.0 , 20 , 0.0 , 0.7);
-//TODO:对图像和激光的投影图像分别设置lsd参数进行数据处理
-cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 1.8 , 25 , 0.0 , 0.65);
+// cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_NONE , 0.8 , 0.6 , 1.5 , 30 , 0.0 , 0.7);
+cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 1.8 , 20 , 0.0 , 0.65);
+// cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 1.8 , 30 , 0.0 , 0.65);
+
+
 vector<cv::Vec4f> lines_lsd_orig;
 vector<cv::Vec4f> lines_lsd_proj;
 //LSD detector
@@ -54,6 +60,7 @@ vector<cv::Vec4f> lines_selected_proj;
 vector<cv::Point2d> intersection_pts_orig;
 vector<cv::Point2d> intersection_pts_proj;
 
+#if useAuxiliaryLines
 //Auxiliary lines
 int auxiliary_num;
 vector<int> label_lines_auxiliary_orig1;
@@ -65,66 +72,87 @@ vector<cv::Vec4f> lines_auxiliary_orig1;
 vector<cv::Vec4f> lines_auxiliary_orig2;
 vector<cv::Vec4f> lines_auxiliary_proj1;
 vector<cv::Vec4f> lines_auxiliary_proj2;
+#endif
+
+#if calcResiduals
+
+vector<cv::Vec4f> lines_lsd_proj_R;
+vector<int> label_lines_selected_proj_R;
+vector<cv::Vec4f> lines_selected_proj_R;
+vector<cv::Point2d> intersection_pts_proj_R;
+
+vector<double> triangle_ori;
+vector<double> triangle_res;
+double residuals_tmp;
+double residuals[3];
+double res_weight_sum = 0.0;
+#endif
 
 Eigen::Matrix3d R_w_c , R_w_l , R_l_c;
 Eigen::Vector3d t_c_w , t_l_w , t_w_l , t_l_c;
+vector<Eigen::Quaterniond> q_container;
+
 struct sort_lines_by_length
-{
+{   //根据特征直线的长度进行排序
     inline bool operator()(const cv::Vec4f& a, const cv::Vec4f& b){
         return ( sqrt(pow(a(0)-a(2),2.0)+pow(a(1)-a(3),2.0)) > sqrt(pow(b(0)-b(2),2.0)+pow(b(1)-b(3),2.0)) );
     }
 };
 
 vector<cv::Point2d> calcIntersectionPoint(vector<cv::Vec4f> lines_calib)
-{   //这个函数就不考虑只选择了三条直线的情况了，三条直线的情况后面单独实现，跟在selected后边
+{   //计算消失点与垂直直线交点
     vector<cv::Point2d> intersection_pts;
     cv::Point2d intersection_pt;
     double slope[4];
     double intercept[4];
-    for(int i = 0 ; i < calib_lines_sets_num ; i++)
-    {
-        /**/
-        for(int j = 0 ; j < 4 ; j++)
-        {   //求解直线斜率和截距
-            slope[j] = (lines_calib[4 * i + j](1) - lines_calib[4 * i + j](3)) / (lines_calib[4 * i + j](0) - lines_calib[4 * i + j](2));
-            intercept[j] = lines_calib[4 * i + j](1) - slope[j] * lines_calib[4 * i + j](0);
-        }
-        if(slope[0] != slope[1])
-        {   //直线在图像上不平行
-            intersection_pt.x = (intercept[1] - intercept[0]) / (slope[0] - slope[1]);
-            intersection_pt.y = slope[0] * intersection_pt.x + intercept[0];
-            intersection_pts.emplace_back(intersection_pt);
-        }
-        else
-        {
-            cout << "Error! These two lines are parallel." << endl;
-        }
-        if(slope[2] != slope[3])
-        {   //直线在图像上不平行
-            intersection_pt.x = (intercept[3] - intercept[2]) / (slope[2] - slope[3]);
-            intersection_pt.y = slope[2] * intersection_pt.x + intercept[2];
-            intersection_pts.emplace_back(intersection_pt);
-
-        }
-        else
-        {
-            cout << "Error! These two lines are parallel." << endl;
-        }
-
-        //然后开始求解四条平行线的交点
-        intersection_pt.x = (intercept[0] - intercept[2]) / (slope[2] - slope[0]);
-        intersection_pt.y = slope[2] * intersection_pt.x + intercept[2];
-        intersection_pts.emplace_back(intersection_pt);//corner_a
-
-        intersection_pt.x = (intercept[0] - intercept[3]) / (slope[3] - slope[0]);
-        intersection_pt.y = slope[3] * intersection_pt.x + intercept[3];
-        intersection_pts.emplace_back(intersection_pt);//corner_b
+    for(int j = 0 ; j < 4 ; j++)
+    {   //求解直线斜率和截距
+        slope[j] = (lines_calib[j](1) - lines_calib[j](3)) / (lines_calib[j](0) - lines_calib[j](2));
+        intercept[j] = lines_calib[j](1) - slope[j] * lines_calib[j](0);
     }
+    if(slope[0] != slope[1])
+    {   //直线在图像上不平行
+        intersection_pt.x = (intercept[1] - intercept[0]) / (slope[0] - slope[1]);
+        intersection_pt.y = slope[0] * intersection_pt.x + intercept[0];
+        intersection_pts.emplace_back(intersection_pt);
+    }
+    else
+    {
+        cout << "Error! These two lines are parallel." << endl;
+    }
+    if(slope[2] != slope[3])
+    {   //直线在图像上不平行
+        intersection_pt.x = (intercept[3] - intercept[2]) / (slope[2] - slope[3]);
+        intersection_pt.y = slope[2] * intersection_pt.x + intercept[2];
+        intersection_pts.emplace_back(intersection_pt);
+
+    }
+    else
+    {
+        cout << "Error! These two lines are parallel." << endl;
+    }
+
+    //然后开始求解四条线的交点
+    intersection_pt.x = (intercept[0] - intercept[2]) / (slope[2] - slope[0]);
+    intersection_pt.y = slope[2] * intersection_pt.x + intercept[2];
+    intersection_pts.emplace_back(intersection_pt);//corner_a
+
+    intersection_pt.x = (intercept[0] - intercept[3]) / (slope[3] - slope[0]);
+    intersection_pt.y = slope[3] * intersection_pt.x + intercept[3];
+    intersection_pts.emplace_back(intersection_pt);//corner_b
+
+    intersection_pt.x = (intercept[1] - intercept[2]) / (slope[2] - slope[1]);
+    intersection_pt.y = slope[2] * intersection_pt.x + intercept[2];
+    intersection_pts.emplace_back(intersection_pt);//corner_d
+
+    intersection_pt.x = (intercept[1] - intercept[3]) / (slope[3] - slope[1]);
+    intersection_pt.y = slope[3] * intersection_pt.x + intercept[3];
+    intersection_pts.emplace_back(intersection_pt);//corner_c
     return intersection_pts;
 }
 
 cv::Point2d calcVanishingPoint(vector<cv::Vec4f> lines_calib)
-{   
+{   //辅助直线计算消失点
     cv::Point2d vanishing_pt;
     double *slope = (double *)malloc(lines_calib.size() * sizeof(double));
     double *intercept = (double *)malloc(lines_calib.size() * sizeof(double));
@@ -139,8 +167,8 @@ cv::Point2d calcVanishingPoint(vector<cv::Vec4f> lines_calib)
     {
         U.row(i) << -slope[i] , 1;
         b(i) = intercept[i];
-        cout << i << "th lines." << endl;
-        cout << " k :" << slope[i] << " b :" << intercept[i] << endl; 
+        // cout << i << "th lines." << endl;
+        // cout << " k :" << slope[i] << " b :" << intercept[i] << endl; 
     }
     Eigen::Vector2d cv_pt = (U.transpose() * U).inverse() * U.transpose() * b;
     vanishing_pt.x = cv_pt(0);
@@ -153,7 +181,6 @@ cv::Point2d calcVanishingPoint(vector<cv::Vec4f> lines_calib)
 
 Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> intersection_pts , double length_AB)
 {
-    //TODO：同样如上需要对坐标系与坐标原点进行确定
     Eigen::Vector3d t_c;
 
     double length = 0;
@@ -173,8 +200,6 @@ Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> inter
     t_c = corner_a.normalized() * length;
     return t_c;
 }
-
-//TODO:进行了重载，然后进行测试
 
 Eigen::Matrix3d calcRotation(vector<double> camera_inner , vector<cv::Point2d> vanishing_pts)
 {
@@ -213,7 +238,6 @@ Eigen::Matrix3d calcRotation(vector<double> camera_inner , vector<cv::Point2d> v
 
 Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> intersection_pts , vector<cv::Point2d> vanishing_pts , double length_AB)
 {
-    //TODO：同样如上需要对坐标系与坐标原点进行确定
     Eigen::Vector3d t_w;
 
     double length = 0;
@@ -235,112 +259,6 @@ Eigen::Vector3d calcPose(vector<double> camera_inner , vector<cv::Point2d> inter
 }
 
 
-class vanishing_calib
-{
-    public:
-        vanishing_calib(vanishingData v_pts) { vd  = v_pts; };
-        template <typename T> 
-        bool operator()(const T *_q , const T *_t , T *residuals) const {
-            Eigen::Quaternion<T> q_incre{_q[3] , _q[0] , _q[1] , _q[2]};
-            Eigen::Matrix<T , 3 ,1> t_incre{_t[0] , _t[1] , _t[2]};
-            //由于点都是之前投影图像里面计算的，所以不需要像lcc里面一样重新进行投影并且去畸变
-            vector<T> scale_orin;
-            vector<T> scale_project;
-            cv::Point2d test_pt;
-
-            // scale_orin.emplace_back((T)sqrt(pow((vd.pts_orin[0] - vd.pts_orin[1]).x , 2) + pow((vd.pts_orin[0] - vd.pts_orin[1]).y , 2)));
-            // scale_orin.emplace_back((T)sqrt(pow((vd.pts_orin[0] - vd.pts_orin[2]).x , 2) + pow((vd.pts_orin[0] - vd.pts_orin[2]).y , 2)));
-            // scale_orin.emplace_back((T)sqrt(pow((vd.pts_orin[1] - vd.pts_orin[2]).x , 2) + pow((vd.pts_orin[1] - vd.pts_orin[2]).y , 2)));
-
-            // scale_project.emplace_back((T)sqrt(pow((vd.pts_project[0] - vd.pts_project[1]).x , 2) + pow((vd.pts_project[0] - vd.pts_project[1]).y , 2)));
-            // scale_project.emplace_back((T)sqrt(pow((vd.pts_project[0] - vd.pts_project[2]).x , 2) + pow((vd.pts_project[0] - vd.pts_project[2]).y , 2)));
-            // scale_project.emplace_back((T)sqrt(pow((vd.pts_project[1] - vd.pts_project[2]).x , 2) + pow((vd.pts_project[1] - vd.pts_project[2]).y , 2)));
-
-            // residuals[0] = (T)(scale_orin[0] - scale_orin[1]) - (scale_project[0] - scale_project[1]);
-            // residuals[1] = (T)(scale_orin[0] - scale_orin[2]) - (scale_project[0] - scale_project[2]);
-            // residuals[2] = (T)(vd.pts_orin[0].y - vd.pts_orin[1].y)/(vd.pts_orin[0].x - vd.pts_orin[1].x) - (vd.pts_project[0].y - vd.pts_project[1].y) / (vd.pts_project[0].x - vd.pts_project[1].x);
-
-
-            Eigen::Matrix<T , 3 , 1> corner_a_orin , corner_b_orin , vanishing_pt1_orin , vanishing_pt2_orin;
-            Eigen::Matrix<T , 3 , 1> corner_a_proj , corner_b_proj , vanishing_pt1_proj , vanishing_pt2_proj;
-            Eigen::Matrix<T , 3 , 1> corner_a_proj1 , corner_b_proj1 , vanishing_pt1_proj1 , vanishing_pt2_proj1;
-            Eigen::Matrix<T , 3 , 3> r_c_l = q_incre.toRotationMatrix();
-            Eigen::Matrix<T , 3 , 3> r_w_c , r_w_l , R_w;
-            Eigen::Matrix<T , 3 , 1> R_w_1 , R_w_2 , R_w_3;
-
-            vanishing_pt1_orin << (T)vd.pts_orin[0].x - 717.7188725924585 , (T)vd.pts_orin[0].y - 581.0874277311857 , (T)1;
-            vanishing_pt2_orin << (T)vd.pts_orin[1].x - 717.7188725924585 , (T)vd.pts_orin[1].y - 581.0874277311857 , (T)1;
-            corner_a_orin << (T)vd.pts_orin[2].x - 717.7188725924585 , (T)vd.pts_orin[2].y - 581.0874277311857 , (T)1;
-
-            vanishing_pt1_proj << (T)vd.pts_project[0].x - 717.7188725924585 , (T)vd.pts_project[0].y - 581.0874277311857 , (T)1;
-            vanishing_pt2_proj << (T)vd.pts_project[1].x - 717.7188725924585 , (T)vd.pts_project[1].y - 581.0874277311857 , (T)1;
-            corner_a_proj << (T)vd.pts_project[2].x - 717.7188725924585 , (T)vd.pts_project[2].y - 581.0874277311857 , (T)1;
-
-            // cout << vanishing_pt1_orin << endl;
-            Eigen::Matrix<T , 3 ,3> K_c;
-            K_c << (T)1196.3 , (T)0 , (T)0 , (T)0 , (T)1196.3 , (T)0 , (T)0 , (T)0 , (T)1;
-
-            if(vanishing_pt1_orin.y() < (T)0)
-            {
-                vanishing_pt1_orin = -vanishing_pt1_orin;
-            }
-            if(vanishing_pt2_orin.x() > (T)0)
-            {
-                vanishing_pt2_orin = -vanishing_pt2_orin;
-            }
-
-            R_w_1 = (K_c.inverse() * vanishing_pt1_orin).normalized();
-            R_w_2 = (K_c.inverse() * vanishing_pt2_orin).normalized();//目前看来两种表述方法获得的结果是一致的
-            R_w_3 = (R_w_1.cross(R_w_2)).normalized();
-
-            R_w << R_w_1 , R_w_2 , R_w_3;
-            r_w_c = R_w.transpose();
-            // cout << r_w_c << endl;
-            r_w_l = q_incre.toRotationMatrix() * r_w_c;
-            // cout << "rwl" << r_w_l << endl;
-
-            // if(r_w_l(0 , 2)  < (T)0)
-            // {
-            //     vanishing_pt1_proj1(0) = -r_w_l.coeffRef(0 , 0) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
-            //     vanishing_pt1_proj1(1) = -r_w_l.coeffRef(0 , 1) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
-            //     vanishing_pt1_proj1(2) = (T)1;
-            // }
-            // else if(r_w_l(0 , 2) > (T)0)
-            {
-                vanishing_pt1_proj1[0] = r_w_l.coeffRef(0 , 0) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
-                vanishing_pt1_proj1[1] = r_w_l.coeffRef(0 , 1) * ((T)1 / r_w_l(0 , 2)) * 1196.3;
-                vanishing_pt1_proj1[2] = (T)1;
-            }
-            // if(r_w_l(1 , 2) < (T)0)
-            // {
-            //     vanishing_pt2_proj1(0) = -r_w_l.coeffRef(1 , 0) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
-            //     vanishing_pt2_proj1(1) = -r_w_l.coeffRef(1 , 1) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
-            //     vanishing_pt2_proj1(2) = (T)1;
-            // }
-            // else if(r_w_l(1 , 2) > (T)0)
-            {
-                vanishing_pt2_proj1[0] = r_w_l.coeffRef(1 , 0) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
-                vanishing_pt2_proj1[1] = r_w_l.coeffRef(1 , 1) * ((T)1 / r_w_l(1 , 2)) * 1196.3;
-                vanishing_pt2_proj1[2] = (T)1;
-            }
-            vanishing_pt1_proj1 = K_c * vanishing_pt1_proj1;
-            vanishing_pt2_proj1 = K_c * vanishing_pt2_proj1;
-            residuals[0] = (vanishing_pt1_proj(0) - vanishing_pt1_proj1(0));
-            residuals[1] = (vanishing_pt1_proj(1) - vanishing_pt1_proj1(1));
-            residuals[2] = (vanishing_pt2_proj(0) - vanishing_pt2_proj1(0));
-            residuals[3] = (vanishing_pt2_proj(1) - vanishing_pt2_proj1(1));
-            residuals[3] = ((T)1 - sqrt(pow(r_w_l(0 , 0) , 2) + pow(r_w_l(0 , 1) , 2) + pow(r_w_l(0 , 2) , 2))) * (T)1000;
-            residuals[4] = ((T)1 - sqrt(pow(r_w_l(1 , 0) , 2) + pow(r_w_l(1 , 1) , 2) + pow(r_w_l(1 , 2) , 2))) * (T)1000;
-
-            return true;
-        }
-        static ceres::CostFunction *Create(vanishingData v_pts)
-        {
-            return (new ceres::AutoDiffCostFunction<vanishing_calib , 5 , 4 , 3>(new vanishing_calib(v_pts)));
-        }//这里实际上是把阿auto difference放在了类里面进行定义
-    private:
-        vanishingData vd;
-};
 
 
 //TODO:激光部分的可能直接使用激光点要相对更准确一些？但是像素如何和三维点对应，并且如果对应的话点不在同一个平面上如何进行处理呢，若果能解决这个问题可以减小激光提取的误差
@@ -364,18 +282,8 @@ int main(int argc , char **argv)
     rotation_matrix << Extrinsic_vector[0] , Extrinsic_vector[1] , Extrinsic_vector[2] , Extrinsic_vector[4] , Extrinsic_vector[5] , Extrinsic_vector[6] ,Extrinsic_vector[8] , Extrinsic_vector[9] , Extrinsic_vector[10];
     transform_vector << Extrinsic_vector[3] , Extrinsic_vector[7] , Extrinsic_vector[11];
 
-    // while(cin >> label_test)
-    // {
-    //     cout << label_test << endl;
-    // }
 
-    // cout << "continue" << endl;
-    // cin.clear();
-    // cout<<cin.rdstate()<<endl;
-    // cin.ignore(10, '\n'); // cin无限制输入测试
-    //Read the param form config file.
-    // TODO:替换后续的输入，变成可以输入任意数量直线
-
+    /*光学图像和pcd投影图像的读取*/
     cv::Mat image_orig = cv::imread(image_file , cv::IMREAD_UNCHANGED);
     cv::Mat image_gray;
 
@@ -401,7 +309,7 @@ int main(int argc , char **argv)
     cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(40.0, cv::Size(5, 5));
     clahe->apply(image_gray, image_gray);
     // cv::medianBlur(image_gray , image_gray , 3);//不做中值滤波因该能够更好保证图像的原始几何特征
-    
+
     lsd->detect(image_gray , lines_lsd_orig );
 
     sort(lines_lsd_orig.begin() , lines_lsd_orig.end() , sort_lines_by_length());
@@ -415,8 +323,105 @@ int main(int argc , char **argv)
     cv::imshow("lsd origin image" , lsd_orig_gray);
     cv::waitKey(100);
     //Detect lines in image and show them
+
+    /*选取原始图像上的一组正交直线*/
+    cout << "Please select 1 sets of lines in origin image." << endl;
+    for(int i = 0 ; i < 4 ; i++)
+    {
+        cin >> label_line_selected;
+        label_lines_selected_orig.emplace_back(label_line_selected);
+    }
+    cout << "You have choosen lines in origin image whose label are :" << endl;
+
+    for(auto it = label_lines_selected_orig.begin() ; it != label_lines_selected_orig.end() ; ++it)
+    {
+        lines_selected_orig.emplace_back(lines_lsd_orig[*it]);
+        cout << *it << " ";
+    }
+    cout << endl;
+
+    lsd->drawSegments(image_gray , lines_selected_orig);
+    for(int i = 0 ; i < lines_selected_orig.size() ; ++i)
+    {
+        cv::putText(image_gray , to_string(label_lines_selected_orig[i]) , cv::Point((lines_selected_orig[i](0) + lines_selected_orig[i](2)) / 2 , (lines_selected_orig[i](1) + lines_selected_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+    }
+    cv::imshow("lsd image selected" , image_gray);
+    cv::waitKey(100);
+
+    intersection_pts_orig = calcIntersectionPoint(lines_selected_orig);
+
+#if calcResiduals
+    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[3]).y , 2));
+    triangle_ori.emplace_back(residuals_tmp);
+    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[4]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[4]).y , 2));
+    triangle_ori.emplace_back(residuals_tmp);
+    residuals_tmp = sqrt(pow((intersection_pts_orig[4] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[4] - intersection_pts_orig[3]).y , 2));
+    triangle_ori.emplace_back(residuals_tmp);
+#endif
+
+#if useAuxiliaryLines
+    // 选择用于消失点计算的辅助直线
+    cout << "Please enter how many auxiliary lines in first direction to selected in origin image." << endl;
+    cin >> auxiliary_num;
+    cout << "Please selected lines." << endl;
+    for(int i = 0 ; i < auxiliary_num ; i++)
+    {
+        cin >> label_line_selected;
+        label_lines_auxiliary_orig1.emplace_back(label_line_selected);
+    }
+    lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(0));
+    lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(1));
+    for(auto it = label_lines_auxiliary_orig1.begin() ; it != label_lines_auxiliary_orig1.end() ; ++it)
+    {
+        lines_auxiliary_orig1.emplace_back(lines_lsd_orig[*it]);
+        cout << *it << " ";
+    }
+    cout << endl;
+
+    cout << "Please enter how many auxiliary lines in second direction to selected in  origin image." << endl;
+    cin >> auxiliary_num;
+    cout << "Please selected lines." << endl;
+    for(int i = 0 ; i < auxiliary_num ; i++)
+    {
+        cin >> label_line_selected;
+        label_lines_auxiliary_orig2.emplace_back(label_line_selected);
+    }
+    lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(2));
+    lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(3));
+    for(auto it = label_lines_auxiliary_orig2.begin() ; it != label_lines_auxiliary_orig2.end() ; ++it)
+    {
+        lines_auxiliary_orig2.emplace_back(lines_lsd_orig[*it]);
+        cout << *it << " ";
+    }
+    cout << endl;
+
+    intersection_pts_orig[0] = calcVanishingPoint(lines_auxiliary_orig1);
+    intersection_pts_orig[1] = calcVanishingPoint(lines_auxiliary_orig2);
+#endif
+
+    cout << "The intersection points in origin image are:" << endl;
+    cout << intersection_pts_orig << endl;
+
+
+    R_w_c = calcRotation(camera_inner , intersection_pts_orig);//计算出了相机坐标系到选取直线目标的世界坐标系之间的转化关系
+    t_c_w = calcPose(camera_inner , intersection_pts_orig , 60);
+
+
+
     /*代码模块测试用*/
-    LidarProjection test(pcd_file);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_point_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
+    if(pcl::io::loadPCDFile(pcd_file , *lidar_point_cloud) == -1)
+    {
+        ROS_ERROR("Failed load PCD file.");
+        exit(1);
+    }
+    else
+    {
+        ROS_INFO("Load PCD file sucessfully!");
+    }
+
+
+    LidarProjection test(lidar_point_cloud);
     Vector6d test_vector;
     cv::Mat test_mat;
     
@@ -445,7 +450,7 @@ int main(int argc , char **argv)
     //Load PCD file and get projection image of it
 
     cv::medianBlur(test_mat , test_mat , 3);
-    // cv::fastNlMeansDenoising(test_mat , test_mat);
+    cv::fastNlMeansDenoising(test_mat , test_mat);
     project_lsd->detect(test_mat , lines_lsd_proj);
     sort(lines_lsd_proj.begin() , lines_lsd_proj.end() , sort_lines_by_length());
     lines_lsd_proj.resize(max_proj_lines_num);
@@ -458,151 +463,207 @@ int main(int argc , char **argv)
     cv::imshow("projection_test" , lsd_proj_gray);
     cv::waitKey(1000);
     //Detect lines in projection image and show them
-    
-    cout << "Please enter how many sets of lines to selected." << endl;
-    cin >> calib_lines_sets_num;
-    cout << "Please select " << calib_lines_sets_num << " sets of lines in origin image." << endl;
-    for(int i = 0 ; i < 4 * calib_lines_sets_num ; i++)
+
+
+    while(ros::ok())
     {
-        cin >> label_line_selected;
-        label_lines_selected_orig.emplace_back(label_line_selected);
-    }
-    cout << "You have choosen lines in origin image whose label are :" << endl;
+        int exit_flag = 1;
+        label_lines_selected_proj.clear();
+        lines_selected_proj.clear();
+        cout << "Please select the same lines in projection image." << endl;
+        for(int i = 0 ; i < 4 ; i++)
+        {
+            cin >> label_line_selected;
+            label_lines_selected_proj.emplace_back(label_line_selected);
+        }
+        cout << "You have choosen lines in projection image whose label are :" << endl;
+        for(auto it = label_lines_selected_proj.begin() ; it != label_lines_selected_proj.end() ; ++it)
+        {
+            lines_selected_proj.emplace_back(lines_lsd_proj[*it]);
+            cout << *it << " ";
+        }
+        cout << endl;
 
-    for(auto it = label_lines_selected_orig.begin() ; it != label_lines_selected_orig.end() ; ++it)
+        project_lsd->drawSegments(test_mat , lines_selected_proj);
+        for(int i = 0 ; i < lines_selected_proj.size() ; ++i)
+        {
+            cv::putText(test_mat , to_string(label_lines_selected_proj[i]) , cv::Point((lines_selected_proj[i](0) + lines_selected_proj[i](2)) / 2 , (lines_selected_proj[i](1) + lines_selected_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+        }
+        cv::imshow("proj image selected" , test_mat);
+        cv::waitKey(1000);
+        //Select lines that will be used in calibration manually and show them
+        intersection_pts_proj = calcIntersectionPoint(lines_selected_proj);
+
+    #if useAuxiliaryLines
+        //选择投影图像用于消失点计算的辅助直线
+        cout << "Please enter how many auxiliary lines in first direction to selected in projection image." << endl;
+        cin >> auxiliary_num;
+        cout << "Please selected lines." << endl;
+        for(int i = 0 ; i < auxiliary_num ; i++)
+        {
+            cin >> label_line_selected;
+            label_lines_auxiliary_proj1.emplace_back(label_line_selected);
+        }
+        lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(0));
+        lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(1));
+        for(auto it = label_lines_auxiliary_proj1.begin() ; it != label_lines_auxiliary_proj1.end() ; ++it)
+        {
+            lines_auxiliary_proj1.emplace_back(lines_lsd_proj[*it]);
+            cout << *it << " ";
+        }
+        cout << endl;
+
+        cout << "Please enter how many auxiliary lines in second direction to selected in projection image." << endl;
+        cin >> auxiliary_num;
+        cout << "Please selected lines." << endl;
+        for(int i = 0 ; i < auxiliary_num ; i++)
+        {
+            cin >> label_line_selected;
+            label_lines_auxiliary_proj2.emplace_back(label_line_selected);
+        }
+        lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(2));
+        lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(3));
+        for(auto it = label_lines_auxiliary_proj2.begin() ; it != label_lines_auxiliary_proj2.end() ; ++it)
+        {
+            lines_auxiliary_proj2.emplace_back(lines_lsd_proj[*it]);
+            cout << *it << " ";
+        }
+        cout << endl;
+
+        intersection_pts_proj[0] = calcVanishingPoint(lines_auxiliary_proj1);
+        intersection_pts_proj[1] = calcVanishingPoint(lines_auxiliary_proj2);
+    #endif
+
+        cout << "The intersection point in projection image are:" << endl;
+        cout << intersection_pts_proj << endl;
+
+        R_w_l = calcRotation(camera_inner , intersection_pts_proj);//现在都暂定的是相机内参的标定是准确的
+        R_l_c = R_w_l * (R_w_c.inverse());
+        cout << " r_l_c is " << R_l_c  << endl; 
+
+        Eigen::Matrix3d result_tmp = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+        cout << "matrix this group is " << result_tmp;
+
+        Eigen::Quaterniond q_tmp(result_tmp);
+
+        t_l_w = calcPose(camera_inner , intersection_pts_proj , 60);
+        t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
+        cout << t_l_w;
+        t_l_c = t_c_w - t_l_w;
+        cout << "transform vector between lidar and camera is " << transform_vector + t_l_c << endl;
+#if calcResiduals
+        cv::Mat test_mat1;
+        test_mat1 = test.getProjectionImage(result_tmp , t_l_c / 100);
+
+        cv::medianBlur(test_mat1 , test_mat1 , 3);
+        cv::fastNlMeansDenoising(test_mat1 , test_mat1);
+        project_lsd->detect(test_mat1 , lines_lsd_proj_R);
+        sort(lines_lsd_proj_R.begin() , lines_lsd_proj_R.end() , sort_lines_by_length());
+        lines_lsd_proj_R.resize(max_proj_lines_num);
+        cv::Mat lsd_proj_gray_R = test_mat1.clone();
+        project_lsd->drawSegments(lsd_proj_gray_R , lines_lsd_proj_R);
+        for(int i = 0 ; i < lines_lsd_proj_R.size() ; ++i)
+        {
+            cv::putText(lsd_proj_gray_R , to_string(i) , cv::Point((lines_lsd_proj_R[i](0) + lines_lsd_proj_R[i](2)) / 2 , (lines_lsd_proj_R[i](1) + lines_lsd_proj_R[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+        }
+        cv::imshow("projection_residuals" , lsd_proj_gray_R);
+        cv::waitKey(3000);
+        //Detect lines in projection image and show them
+
+        label_lines_selected_proj_R.clear();
+        lines_selected_proj_R.clear();
+        triangle_res.clear();
+
+        cout << "Please select the same lines in new projection image to calculate residuals." << endl;
+        for(int i = 0 ; i < 4 ; i++)
+        {
+            cin >> label_line_selected;
+            label_lines_selected_proj_R.emplace_back(label_line_selected);
+        }
+        cout << "You have choosen lines in new projection image whose label are :" << endl;
+        for(auto it = label_lines_selected_proj_R.begin() ; it != label_lines_selected_proj_R.end() ; ++it)
+        {
+            lines_selected_proj_R.emplace_back(lines_lsd_proj_R[*it]);
+            cout << *it << " ";
+        }
+        cout << endl;
+
+        project_lsd->drawSegments(test_mat1 , lines_selected_proj_R);
+        for(int i = 0 ; i < lines_selected_proj_R.size() ; ++i)
+        {
+            cv::putText(test_mat1 , to_string(label_lines_selected_proj_R[i]) , cv::Point((lines_selected_proj_R[i](0) + lines_selected_proj_R[i](2)) / 2 , (lines_selected_proj_R[i](1) + lines_selected_proj_R[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+        }
+        cv::imshow("proj image selected residuals" , test_mat);
+        cv::waitKey(1000);
+
+        intersection_pts_proj_R = calcIntersectionPoint(lines_selected_proj_R);
+        cout << intersection_pts_proj_R << endl;
+
+        residuals_tmp = sqrt(pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[3]).x , 2) + pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[3]).y , 2));
+        triangle_res.emplace_back(residuals_tmp);
+        residuals_tmp = sqrt(pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[4]).x , 2) + pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[4]).y , 2));
+        triangle_res.emplace_back(residuals_tmp);
+        residuals_tmp = sqrt(pow((intersection_pts_proj_R[4] - intersection_pts_proj_R[3]).x , 2) + pow((intersection_pts_proj_R[4] - intersection_pts_proj_R[3]).y , 2));
+        triangle_res.emplace_back(residuals_tmp);
+
+        residuals[0] = (triangle_ori[0] / triangle_res[0] - triangle_ori[1] /  triangle_res[1]) * 50;
+        residuals[1] = (triangle_ori[0] / triangle_res[0] - triangle_ori[2] /  triangle_res[2]) * 50;
+        residuals[2] = (intersection_pts_orig[3] - intersection_pts_orig[4]).y / (intersection_pts_orig[3] - intersection_pts_orig[4]).x - (intersection_pts_proj_R[3] - intersection_pts_proj_R[4]).y / (intersection_pts_proj_R[3] - intersection_pts_proj_R[4]).x;
+        cout << residuals[0] << " "  << residuals[1] << " " << residuals[2] << endl;
+
+        res_weight_sum = res_weight_sum + abs(1 / (residuals[0] * residuals[1] * residuals[2]));
+        q_tmp.coeffs() = q_tmp.coeffs() * abs(1 / (residuals[0] * residuals[1] * residuals[2]));
+#endif
+
+
+        q_container.emplace_back(q_tmp);
+
+        cout <<"Type any key except 0 to add lines to optimize result." << endl;
+        cin >> exit_flag;
+
+        if(exit_flag)
+        {
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    cout <<"Exit!" << endl;
+
+    Eigen::Quaterniond q_result(0.0 , 0.0 , 0.0 , 0.0);
+    cout << q_container.size() << endl;
+    for(int i = 0 ; i < q_container.size() ; i++)
     {
-        lines_selected_orig.emplace_back(lines_lsd_orig[*it]);
-        cout << *it << " ";
-    }
-    cout << endl;
-    //选择用于消失点计算的辅助直线
-    // cout << "Please enter how many auxiliary lines in first direction to selected in origin image." << endl;
-    // cin >> auxiliary_num;
-    // for(int i = 0 ; i < auxiliary_num ; i++)
-    // {
-    //     cin >> label_line_selected;
-    //     label_lines_auxiliary_orig1.emplace_back(label_line_selected);
-    // }
-    // cout << "Please selected lines." << endl;
-    // lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(0));
-    // lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(1));
-    // for(auto it = label_lines_auxiliary_orig1.begin() ; it != label_lines_auxiliary_orig1.end() ; ++it)
-    // {
-    //     lines_auxiliary_orig1.emplace_back(lines_lsd_orig[*it]);
-    //     cout << *it << " ";
-    // }
-    // cout << endl;
-
-    // cout << "Please enter how many auxiliary lines in second direction to selected in  origin image." << endl;
-    // cin >> auxiliary_num;
-    // cout << "111111" << endl;
-    // for(int i = 0 ; i < auxiliary_num ; i++)
-    // {
-    //     cin >> label_line_selected;
-    //     label_lines_auxiliary_orig2.emplace_back(label_line_selected);
-    // }
-    // cout << "Please selected lines." << endl;
-    // lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(2));
-    // lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(3));
-    // for(auto it = label_lines_auxiliary_orig2.begin() ; it != label_lines_auxiliary_orig2.end() ; ++it)
-    // {
-    //     lines_auxiliary_orig2.emplace_back(lines_lsd_orig[*it]);
-    //     cout << *it << " ";
-    // }
-    // cout << endl;
-
-    lsd->drawSegments(image_gray , lines_selected_orig);
-    for(int i = 0 ; i < lines_selected_orig.size() ; ++i)
-    {
-        cv::putText(image_gray , to_string(label_lines_selected_orig[i]) , cv::Point((lines_selected_orig[i](0) + lines_selected_orig[i](2)) / 2 , (lines_selected_orig[i](1) + lines_selected_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
-    }
-    cv::imshow("lsd image selected" , image_gray);
-    cv::waitKey(100);
-
-
-    cout << "Please select the same lines in projection image." << endl;
-    for(int i = 0 ; i < 4 * calib_lines_sets_num ; i++)
-    {
-        cin >> label_line_selected;
-        label_lines_selected_proj.emplace_back(label_line_selected);
-    }
-    cout << "You have choosen lines in projection image whose label are :" << endl;
-    for(auto it = label_lines_selected_proj.begin() ; it != label_lines_selected_proj.end() ; ++it)
-    {
-        lines_selected_proj.emplace_back(lines_lsd_proj[*it]);
-        cout << *it << " ";
-    }
-    cout << endl;
-
-    //选择投影图像用于消失点计算的辅助直线
-    // cout << "Please enter how many auxiliary lines in first direction to selected in projection image." << endl;
-    // cin >> auxiliary_num;
-    // for(int i = 0 ; i < auxiliary_num ; i++)
-    // {
-    //     cin >> label_line_selected;
-    //     label_lines_auxiliary_proj1.emplace_back(label_line_selected);
-    // }
-    // cout << "Please selected lines." << endl;
-    // lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(0));
-    // lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(1));
-    // for(auto it = label_lines_auxiliary_proj1.begin() ; it != label_lines_auxiliary_proj1.end() ; ++it)
-    // {
-    //     lines_auxiliary_proj1.emplace_back(lines_lsd_proj[*it]);
-    //     cout << *it << " ";
-    // }
-    // cout << endl;
-
-    // cout << "Please enter how many auxiliary lines in second direction to selected in projection image." << endl;
-    // cin >> auxiliary_num;
-    // for(int i = 0 ; i < auxiliary_num ; i++)
-    // {
-    //     cin >> label_line_selected;
-    //     label_lines_auxiliary_proj2.emplace_back(label_line_selected);
-    // }
-    // cout << "Please selected lines." << endl;
-    // lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(2));
-    // lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(3));
-    // for(auto it = label_lines_auxiliary_proj2.begin() ; it != label_lines_auxiliary_proj2.end() ; ++it)
-    // {
-    //     lines_auxiliary_proj2.emplace_back(lines_lsd_proj[*it]);
-    //     cout << *it << " ";
-    // }
-    // cout << endl;
-
-
-    project_lsd->drawSegments(test_mat , lines_selected_proj);
-    for(int i = 0 ; i < lines_selected_proj.size() ; ++i)
-    {
-        cv::putText(test_mat , to_string(label_lines_selected_proj[i]) , cv::Point((lines_selected_proj[i](0) + lines_selected_proj[i](2)) / 2 , (lines_selected_proj[i](1) + lines_selected_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
-    }
-    cv::imshow("proj image selected" , test_mat);
-    //TODO:需要修改成能够选择多条直线，然后完成3条直线确定一个正方形的代码，输入选择直线的时候要求按照一组平行线连续输入
-    //Select lines that will be used in calibration manually and show them
-
-    intersection_pts_orig = calcIntersectionPoint(lines_selected_orig);
-    intersection_pts_proj = calcIntersectionPoint(lines_selected_proj);
-    //这里已经把消失点算出来了，然后根据消失点理论分别计算外参的旋转矩阵和位置
-    cout << "The vanishing points in origin image are:" << endl;
-    for(auto it = intersection_pts_orig.begin() ; it != intersection_pts_orig.end() ; it++)
-    {
-        cout << *it << endl;
-    }
-    cout << "The vanishing point in projection image are:" << endl;
-    for(auto it = intersection_pts_proj.begin() ; it != intersection_pts_proj.end() ; it++)
-    {
-        cout << *it << endl;
+        cout << q_container[i].x() << q_container[i].y() << q_container[i].z() << q_container[i].w() << endl;
+        if(q_container[i].z() < 0)
+        {
+            q_result.coeffs() = q_result.coeffs() - q_container[i].coeffs(); 
+        }
+        else if(q_container[i].z() > 0)
+        {
+            q_result.coeffs() = q_result.coeffs() + q_container[i].coeffs(); 
+        }
+        
+    cout << q_result.x() << q_result.y() << q_result.z() << q_result.w() << endl;
     }
 
-    R_w_c = calcRotation(camera_inner , intersection_pts_orig);
-    R_w_l = calcRotation(camera_inner , intersection_pts_proj);//现在都暂定的是相机内参的标定是准确的
-    R_l_c = R_w_l * (R_w_c.inverse());
+    cout << q_result.x() << q_result.y() << q_result.z() << q_result.w() << endl;
+#if calcResiduals
+    q_result.coeffs() = q_result.coeffs() / res_weight_sum;
+#else
+    q_result.coeffs() = q_result.coeffs() / (float)q_container.size();
+#endif
+    q_result.normalize();
+    cout << "q_result" << endl;//做个施密特正交化
 
-    cout << "rc" << R_w_c << endl;
-    cout << "rl" << R_w_l << endl;
+    cout << q_result.x() << q_result.y() << q_result.z() << q_result.w() << endl;
 
-    // Eigen::Matrix3d result_matrix = R_l_c.inverse() * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
-    Eigen::Matrix3d result_matrix = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
 
+    Eigen::Matrix3d result_matrix;
+    result_matrix = q_result.toRotationMatrix();
     if(getAngle)
     {
         Eigen::Vector3d result_euler = result_matrix.eulerAngles(2 , 1 , 0);
@@ -612,48 +673,6 @@ int main(int argc , char **argv)
     {
         cout << "The rotation angle between lidar and camera is: " << result_matrix << endl;
     }
-
-    t_c_w = calcPose(camera_inner , intersection_pts_orig , 60);
-    t_l_w = calcPose(camera_inner , intersection_pts_proj , 60);
-    cout << " r_l_c is " << R_l_c  << endl; 
-    t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
-    cout << t_l_w;
-    t_l_c = t_c_w - t_l_w;
-    cout << "transform vector between lidar and camera is " << transform_vector + t_l_c << endl;
-    
-    
-    /*使用辅助直线进行单帧里面某一组消失点的求解*/
-    // vector<cv::Point2d> test_pts1 , test_pts2;
-    // cv::Point2d test_point = calcVanishingPoint(lines_auxiliary_orig1);
-    // test_pts1.emplace_back(test_point);
-    // test_point = calcVanishingPoint(lines_auxiliary_orig2);
-    // test_pts1.emplace_back(test_point);
-    // test_point = calcVanishingPoint(lines_auxiliary_proj1);
-    // test_pts2.emplace_back(test_point);
-    // test_point = calcVanishingPoint(lines_auxiliary_proj2);
-    // test_pts2.emplace_back(test_point);
-    // cout << test_pts1 << endl;
-    // cout << test_pts2 << endl;
-
-
-    // R_w_c = calcRotation(camera_inner , test_pts1);
-    // R_w_l = calcRotation(camera_inner , test_pts2);
-    // R_l_c = R_w_l * (R_w_c.inverse());
-
-    // cout << "rc_au" << R_w_c << endl;
-    // cout << "rl_au" << R_w_l << endl;
-    // result_matrix = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
-    // cout << "test matrix au: " << result_matrix << endl;
-    // cout << "R_w_c" << R_w_c <<  endl;
-    // cout << R_w_c * R_w_c.transpose() << endl;
-    // cout << "R_w_l" << R_w_l << endl;
-    // cout << R_w_l * R_w_l.transpose() << endl;
-    // R_l_c = R_w_l * (R_w_c.inverse());
-    // cout << R_l_c << endl;
-    // //TODO:对旋转矩阵进行史密特正交化
-
-    // result_matrix = R_l_c.inverse() * rotation_matrix;
-
 
     cv::waitKey(0);
     return 0;
