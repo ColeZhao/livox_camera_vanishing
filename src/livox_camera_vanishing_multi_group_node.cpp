@@ -345,6 +345,7 @@ int main(int argc , char **argv)
         LidarProjection test(lidar_point_cloud);
         Vector6d test_vector;
         cv::Mat test_mat;
+        cv::Mat compared_mat;
         
         test.width = image_gray.size().width;
         test.height = image_gray.size().height;
@@ -362,11 +363,12 @@ int main(int argc , char **argv)
         if(getAngle)
         {
             test_mat = test.getProjectionImage(test_vector);
-            cout << " get angle!";
         }
         else if(getMat)
         {
             test_mat = test.getProjectionImage(rotation_matrix , transform_vector);
+            compared_mat = test.getComparedImage(image_gray , rotation_matrix , transform_vector);
+            cv::imshow("com" , compared_mat);
         }
 
         cv::medianBlur(test_mat , test_mat , 3);
@@ -696,6 +698,7 @@ int main(int argc , char **argv)
     }
     ROS_INFO("The transpose between lidar and camera is : \n");
     cout << t_result << endl;
+    
 
     cv::waitKey(0);
     return 0;

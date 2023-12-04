@@ -28,6 +28,8 @@ class LidarProjection
         cv::Mat getProjectionImage(const Vector6d &extrinsic_params);
         cv::Mat getProjectionImage(const Eigen::Matrix3d &rotation_matrix , const Eigen::Vector3d &transform_vector);
         cv::Mat fillImg(const cv::Mat &input_img);
+        cv::Mat getComparedImage(const cv::Mat &input_img , const Vector6d &extrinsic_params);
+        cv::Mat getComparedImage(const cv::Mat &input_img , const Eigen::Matrix3d &rotation_matrix , const Eigen::Vector3d &transform_vector);
 
         std::vector<cv::Point3f> pts_3d;
 
@@ -235,5 +237,31 @@ cv::Mat LidarProjection::fillImg(const cv::Mat &input_img)
     return output_img;
 }
 
+cv::Mat LidarProjection::getComparedImage(const cv::Mat &input_img , const Eigen::Matrix3d &rotation_matrix , const Eigen::Vector3d &transform_vector)
+{
+    cv::Mat compared_img , src_img , lidar_img;
+    lidar_img = getProjectionImage(rotation_matrix , transform_vector);
+    cv::Mat map_img = cv::Mat::zeros(height, width, CV_8UC3);
+    for (int x = 0; x < map_img.cols; x++) {
+        for (int y = 0; y < map_img.rows; y++) {
+            uint8_t r, g, b;
+            float norm = lidar_img.at<uchar>(y, x) / 256.0;
+            mapJet(norm, 0, 1, r, g, b);
+            map_img.at<cv::Vec3b>(y, x)[0] = b;
+            map_img.at<cv::Vec3b>(y, x)[1] = g;
+            map_img.at<cv::Vec3b>(y, x)[2] = r;
+        }
+    }
+    if(input_img.type() == CV_8UC3)
+    {
+        compared_img = 0.8 * input_img + 0.5 * map_img;
+    }
+    else
+    {
+        cv::cvtColor(input_img , src_img , cv::COLOR_GRAY2BGR);
+        compared_img = 0.8 * src_img + 0.5 * map_img;
+    }
+    return compared_img;
+}
 
 #endif

@@ -633,7 +633,7 @@ int main(int argc , char **argv)
         }
     }
 
-    ROS_INFO("Exit!");
+    cout <<"Exit!" << endl;
 
     Eigen::Quaterniond q_result(0.0 , 0.0 , 0.0 , 0.0);
     Eigen::Vector3d t_result(0.0 , 0.0 , 0.0);
