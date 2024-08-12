@@ -1,7 +1,7 @@
 frame_num: 1
 
-image_file0: "/home/collar/data/vanishing_data/000000.png"
-pcd_file0: "/home/collar/data/vanishing_data/000000.pcd"
+image_file0: "/home/collar/data/vanishing_data/ex8.png"
+pcd_file0: "/home/collar/data/vanishing_data/ex8.pcd"
 
 image_file1: "/home/collar/data/vanishing_data/16.png"
 pcd_file1: "/home/collar/data/vanishing_data/16.pcd"
@@ -12,34 +12,29 @@ pcd_file2: "/home/collar/data/vanishing_data/17.pcd"
 image_file3: "/home/collar/data/vanishing_data/18.png"
 pcd_file3: "/home/collar/data/vanishing_data/18.pcd"
 
-image_file4: "/home/collar/data/vanishing_data/19.png"
-pcd_file4: "/home/collar/data/vanishing_data/19.pcd"
+image_file4: "/home/collar/data/vanishing_data/52.png"
+pcd_file4: "/home/collar/data/vanishing_data/52.pcd"
 # image_file1: "/home/collar/data/vanishing_data/17.png"
 # pcd_file1: "/home/collar/data/vanishing_data/17.pcd"
 
-# camera:
-#     camera_inner: [1196.4418565730384, 0.0,      717.7188725924585,
-#                 0.0,     1196.3710009482545,  581.0874277311857,
-#                 0.0,     0.0,      1.0]
-#     # camera_distortion: [-0, -0, -0, 0, 0.0]
-#     camera_distortion: [-0.09416244866122019, 0.08403929739634683, -0.00018055391689027767, -3.122884805295416e-05, 0.0]
-
 camera:
-    camera_inner: [900.72013997978, 0.0,      1064.69347473416,
-                0.0,     900.85380533831,  757.351332219563,
+    camera_inner: [762.4418565730384, 0.0,      640.5,
+                0.0,     762.3710009482545,  360.5,
                 0.0,     0.0,      1.0]
-    # camera_distortion: [-0, -0, -0, 0, 0.0]
-    camera_distortion: [-0, 0, -0, -0, 0.0]
+    camera_distortion: [-0, -0, -0, 0, 0.0]
+    # camera_distortion: [-0.09416244866122019, 0.08403929739634683, -0.00018055391689027767, -3.122884805295416e-05, 0.0]
+
+
 
 calib:
-    depth_weight: 0
+    depth_weight: 1
     ExtrinsicMat: [0 , -1 , 0 , 0 ,
                    -0 , 0  , -1 , 0. ,
                    1 , 0  , -0 , -0.,
                    0.0 , 0.0 , 0.0 , 1.0]
-    # ExtrinsicMat: [0.00435475 , -1.00001 , -0.00687247 , 0.050166 ,
-    #                 -0.0190299 , 0.0239115  , -0.999371 , -0.002574116 ,
-    #                 0.999811 , 0.00435586  , -0.0189015 , -0.0312415,
+    # ExtrinsicMat: [-0.000610037 , -1 , -0.000314306 , -0.00351008 ,
+    #                 0.00338499 , 0.00031224  , -0.999994 , 0.047475 ,
+    #                 0.999994 , -0.000611097  , 0.0033848 , 0.0235248,
     #                 0.0 , 0.0 , 0.0 , 1.0]
     # ExtrinsicMat: [0.00604422 , -0.999642 ,-0.0260457 , 0.0712932 ,
     #                -0.0104192 , 0.0259818  , -0.999608 , -0.0320054 ,
@@ -65,5 +60,5 @@ calib:
     # init_transform: [1.41831 , -0.866233 , -0.478737 , 0.0653545 , 0.0706324 , -0.05]
     max_orig_lines_num: 300
     max_proj_lines_num: 300
-    line_length: 230
+    line_length: 200
 

@@ -26,7 +26,7 @@ string image_file;
 string pcd_file;
 //Path of image and PCD
 
-
+int frame_num;
 vector<double> Extrinsic_vector;
 Eigen::Matrix3d rotation_matrix;
 Eigen::Vector3d transform_vector;
@@ -37,13 +37,14 @@ vector<double> dist_coeffs;
 double depth_weight;
 vector<double> init_transform;
 double max_orig_lines_num , max_proj_lines_num;
+double line_length;
 //Calibration parameters
 
 
-cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 3.0 , 20 , 0.0 , 0.7);
+cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 0.8 , 2.5 , 20 , 0.0 , 0.7);
 // cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_NONE , 0.8 , 0.6 , 1.5 , 30 , 0.0 , 0.7);
-cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 1.8 , 20 , 0.0 , 0.65);
-// cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 1.8 , 30 , 0.0 , 0.65);
+// cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 1.8 , 20 , 0.0 , 0.65);
+cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 0.8 , 1.5 , 30 , 0.0 , 0.65);
 
 
 vector<cv::Vec4f> lines_lsd_orig;
@@ -269,8 +270,7 @@ int main(int argc , char **argv)
     ros::init(argc , argv , "lidarCamClib");
     ros::NodeHandle nh;
 
-    nh.param<string>(image_file , image_file , "");
-    nh.param<string>("pcd_file" , pcd_file ,"");
+    nh.param<int>("frame_num" , frame_num , 1);
 
     nh.param<vector<double>>("camera/camera_inner" , camera_inner , vector<double>());
     nh.param<vector<double>>("camera/camera_distortion" , dist_coeffs , vector<double>());
@@ -280,360 +280,407 @@ int main(int argc , char **argv)
     int getAngle = nh.param<vector<double>>("calib/init_transform" , init_transform , {0 , 0 , 0 , 0 , 0 , 0});
     nh.param<double>("calib/max_orig_lines_num" , max_orig_lines_num , 250);
     nh.param<double>("calib/max_proj_lines_num" , max_proj_lines_num , 250);
+    nh.param<double>("calib/line_length" , line_length , 0);
 
     rotation_matrix << Extrinsic_vector[0] , Extrinsic_vector[1] , Extrinsic_vector[2] , Extrinsic_vector[4] , Extrinsic_vector[5] , Extrinsic_vector[6] ,Extrinsic_vector[8] , Extrinsic_vector[9] , Extrinsic_vector[10];
     transform_vector << Extrinsic_vector[3] , Extrinsic_vector[7] , Extrinsic_vector[11];
 
 
-    /*光学图像和pcd投影图像的读取*/
-    cv::Mat image_orig = cv::imread(image_file , cv::IMREAD_UNCHANGED);
-    cv::Mat image_gray;
+    for(int i = 0 ; i < frame_num ; i++)
+    {
+        string image_str = "image_file" + to_string(i);
+        string pcd_str = "pcd_file" + to_string(i);
+        nh.param<string>(image_str , image_file , "");
+        nh.param<string>(pcd_str , pcd_file ,"");
 
-    if(!image_orig.data)
-    {
-        ROS_ERROR("Failed load image!");
-        exit(1);
-    }
-    {
-        ROS_INFO("Load image successfully!");
-    }
+            /*光学图像和pcd投影图像的读取*/
+        cv::Mat image_orig = cv::imread(image_file , cv::IMREAD_UNCHANGED);
+        cv::Mat image_gray;
 
-    if(image_orig.type() == CV_8UC1)
-    {
-        image_gray = image_orig;
-    }
-    else if(image_orig.type() == CV_8UC3)
-    {
-        cv::cvtColor(image_orig , image_gray , cv::COLOR_BGR2GRAY);
-    }
-    //Load the image
-
-    pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_point_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
-    if(pcl::io::loadPCDFile(pcd_file , *lidar_point_cloud) == -1)
-    {
-        ROS_ERROR("Failed load PCD file.");
-        exit(1);
-    }
-    else
-    {
-        ROS_INFO("Load PCD file sucessfully!");
-    }
-    //Load the PCD file
-
-    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(40.0, cv::Size(5, 5));
-    clahe->apply(image_gray, image_gray);//直方图均衡化做了图像增强
-
-    lsd->detect(image_gray , lines_lsd_orig );
-    sort(lines_lsd_orig.begin() , lines_lsd_orig.end() , sort_lines_by_length());
-    lines_lsd_orig.resize(max_proj_lines_num);
-    cv::Mat lsd_orig_gray = image_gray.clone();
-    lsd->drawSegments(lsd_orig_gray , lines_lsd_orig);
-    for(int i = 0 ; i < lines_lsd_orig.size() ; ++i)
-    {
-        cv::putText(lsd_orig_gray , to_string(i) , cv::Point((lines_lsd_orig[i](0) + lines_lsd_orig[i](2)) / 2 , (lines_lsd_orig[i](1) + lines_lsd_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-    }
-    cv::imshow("lsd origin image" , lsd_orig_gray);
-    cv::waitKey(100);
-    //Detect lines in image and show them
-
-    LidarProjection test(lidar_point_cloud);
-    Vector6d test_vector;
-    cv::Mat test_mat;
-    
-    test.width = image_gray.size().width;
-    test.height = image_gray.size().height;
-    test.fx = camera_inner[0];
-    test.fy = camera_inner[4];
-    test.cx = camera_inner[2];
-    test.cy = camera_inner[5];
-    test.k1 = dist_coeffs[0];
-    test.k2 = dist_coeffs[1];
-    test.p1 = dist_coeffs[2];
-    test.p2 = dist_coeffs[3];
-    test.k3 = dist_coeffs[4];
-    test.depth_weight = depth_weight;
-    test_vector << init_transform[0] , init_transform[1] , init_transform[2] , init_transform[3] , init_transform[4] , init_transform[5];
-    if(getAngle)
-    {
-        test_mat = test.getProjectionImage(test_vector);
-        cout << " get angle!";
-    }
-    else if(getMat)
-    {
-        test_mat = test.getProjectionImage(rotation_matrix , transform_vector);
-    }
-
-    cv::medianBlur(test_mat , test_mat , 3);
-    cv::fastNlMeansDenoising(test_mat , test_mat);//
-    project_lsd->detect(test_mat , lines_lsd_proj);
-    sort(lines_lsd_proj.begin() , lines_lsd_proj.end() , sort_lines_by_length());
-    lines_lsd_proj.resize(max_proj_lines_num);
-    cv::Mat lsd_proj_gray = test_mat.clone();
-    project_lsd->drawSegments(lsd_proj_gray , lines_lsd_proj);
-    for(int i = 0 ; i < lines_lsd_proj.size() ; ++i)
-    {
-        cv::putText(lsd_proj_gray , to_string(i) , cv::Point((lines_lsd_proj[i](0) + lines_lsd_proj[i](2)) / 2 , (lines_lsd_proj[i](1) + lines_lsd_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-    }
-    cv::imshow("projection_test" , lsd_proj_gray);
-    cv::waitKey(1000);
-    //Detect lines in projection image and show them
-
-/************************************************************************************/
-    label_lines_selected_orig.clear();
-    lines_selected_orig.clear();
-    /*选取原始图像上的一组正交直线*/
-    cout << "Please select 1 sets of lines in origin image." << endl;
-    for(int i = 0 ; i < 4 ; i++)
-    {
-        cin >> label_line_selected;
-        label_lines_selected_orig.emplace_back(label_line_selected);
-    }
-    cout << "You have choosen lines in origin image whose label are :" << endl;
-
-    for(auto it = label_lines_selected_orig.begin() ; it != label_lines_selected_orig.end() ; ++it)
-    {
-        lines_selected_orig.emplace_back(lines_lsd_orig[*it]);
-        cout << *it << " ";
-    }
-    cout << endl;
-
-    lsd->drawSegments(image_gray , lines_selected_orig);
-    for(int i = 0 ; i < lines_selected_orig.size() ; ++i)
-    {
-        cv::putText(image_gray , to_string(label_lines_selected_orig[i]) , cv::Point((lines_selected_orig[i](0) + lines_selected_orig[i](2)) / 2 , (lines_selected_orig[i](1) + lines_selected_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
-    }
-    cv::imshow("lsd image selected" , image_gray);
-    cv::waitKey(100);
-    intersection_pts_orig = calcIntersectionPoint(lines_selected_orig);
-
-#if useAuxiliaryLines
-    // Calculate the intersection points and vanishing points with auxiliary lines.
-    cout << "Please enter how many auxiliary lines in first direction to selected in origin image." << endl;
-    cin >> auxiliary_num;
-    cout << "Please selected lines." << endl;
-    for(int i = 0 ; i < auxiliary_num ; i++)
-    {
-        cin >> label_line_selected;
-        label_lines_auxiliary_orig1.emplace_back(label_line_selected);
-    }
-    lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(0));
-    lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(1));
-    for(auto it = label_lines_auxiliary_orig1.begin() ; it != label_lines_auxiliary_orig1.end() ; ++it)
-    {
-        lines_auxiliary_orig1.emplace_back(lines_lsd_orig[*it]);
-        cout << *it << " ";
-    }
-    cout << endl;
-
-    cout << "Please enter how many auxiliary lines in second direction to selected in  origin image." << endl;
-    cin >> auxiliary_num;
-    cout << "Please selected lines." << endl;
-    for(int i = 0 ; i < auxiliary_num ; i++)
-    {
-        cin >> label_line_selected;
-        label_lines_auxiliary_orig2.emplace_back(label_line_selected);
-    }
-    lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(2));
-    lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(3));
-    for(auto it = label_lines_auxiliary_orig2.begin() ; it != label_lines_auxiliary_orig2.end() ; ++it)
-    {
-        lines_auxiliary_orig2.emplace_back(lines_lsd_orig[*it]);
-        cout << *it << " ";
-    }
-    cout << endl;
-
-    intersection_pts_orig[0] = calcVanishingPoint(lines_auxiliary_orig1);
-    intersection_pts_orig[1] = calcVanishingPoint(lines_auxiliary_orig2);
-#endif
-
-    cout << "The intersection points in origin image are:" << endl;
-    cout << intersection_pts_orig << endl;
-
-#if calcResiduals
-    // Calculate residuals to optimize the quaternion of rotation.
-    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[3]).y , 2));
-    triangle_ori.emplace_back(residuals_tmp);
-    residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[4]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[4]).y , 2));
-    triangle_ori.emplace_back(residuals_tmp);
-    residuals_tmp = sqrt(pow((intersection_pts_orig[4] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[4] - intersection_pts_orig[3]).y , 2));
-    triangle_ori.emplace_back(residuals_tmp);
-#endif
-
-    R_w_c = calcRotation(camera_inner , intersection_pts_orig);
-    t_c_w = calcPose(camera_inner , intersection_pts_orig , 60);
-    //Get the transform matrix between camera and target object.
-
-/************************************************************************************/
-    while(ros::ok())
-    {
-        int exit_flag = 1;
-        label_lines_selected_proj.clear();
-        lines_selected_proj.clear();
-        cout << "Please select the same lines in projection image." << endl;
-        for(int i = 0 ; i < 4 ; i++)
+        if(!image_orig.data)
         {
-            cin >> label_line_selected;
-            label_lines_selected_proj.emplace_back(label_line_selected);
+            ROS_ERROR("Failed load image!");
+            exit(1);
         }
-        cout << "You have choosen lines in projection image whose label are :" << endl;
-        for(auto it = label_lines_selected_proj.begin() ; it != label_lines_selected_proj.end() ; ++it)
         {
-            lines_selected_proj.emplace_back(lines_lsd_proj[*it]);
-            cout << *it << " ";
+            ROS_INFO("Load image successfully!");
         }
-        cout << endl;
-        project_lsd->drawSegments(test_mat , lines_selected_proj);
-        for(int i = 0 ; i < lines_selected_proj.size() ; ++i)
+
+        if(image_orig.type() == CV_8UC1)
         {
-            cv::putText(test_mat , to_string(label_lines_selected_proj[i]) , cv::Point((lines_selected_proj[i](0) + lines_selected_proj[i](2)) / 2 , (lines_selected_proj[i](1) + lines_selected_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+            image_gray = image_orig;
         }
-        cv::imshow("proj image selected" , test_mat);
-        cv::waitKey(1000);
-        //Select lines that will be used in calibration manually and show them
-        intersection_pts_proj = calcIntersectionPoint(lines_selected_proj);
-
-    #if useAuxiliaryLines
-        //选择投影图像用于消失点计算的辅助直线
-        cout << "Please enter how many auxiliary lines in first direction to selected in projection image." << endl;
-        cin >> auxiliary_num;
-        cout << "Please selected lines." << endl;
-        for(int i = 0 ; i < auxiliary_num ; i++)
+        else if(image_orig.type() == CV_8UC3)
         {
-            cin >> label_line_selected;
-            label_lines_auxiliary_proj1.emplace_back(label_line_selected);
+            cv::cvtColor(image_orig , image_gray , cv::COLOR_BGR2GRAY);
         }
-        lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(0));
-        lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(1));
-        for(auto it = label_lines_auxiliary_proj1.begin() ; it != label_lines_auxiliary_proj1.end() ; ++it)
+        cv::Mat map1 , map2;
+        const cv::Mat K = (cv::Mat_<double>(3,3) << camera_inner[0] , camera_inner[1] ,camera_inner[2] , camera_inner[3] , camera_inner[4] , camera_inner[5] , camera_inner[6] , camera_inner[7] ,camera_inner[8]);
+        const cv::Mat D = (cv::Mat_<double>(5,1) << dist_coeffs[0] , dist_coeffs[1] , dist_coeffs[2] , dist_coeffs[3] , dist_coeffs[4]);
+
+        int rows = image_gray.rows ,cols = image_gray.cols;
+        cv::Size imageSize(cols , rows);
+
+        const double alpha = 0;
+        cv::Mat newCameraMatrix = cv::getOptimalNewCameraMatrix(K , D , imageSize , alpha , imageSize , 0);
+        cv::initUndistortRectifyMap(K , D , cv::Mat() , newCameraMatrix , imageSize , CV_8UC1 , map1 , map2);
+        cout << newCameraMatrix.at<double>(0,0) << " " << newCameraMatrix.at<double>(1,1) << " " << newCameraMatrix.at<double>(0,2) << " " << newCameraMatrix.at<double>(1,2)<< endl;
+        cv::remap(image_gray , image_gray , map1 , map2 , cv::INTER_LINEAR);
+        //Load the image
+
+
+        pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_point_cloud = pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
+        if(pcl::io::loadPCDFile(pcd_file , *lidar_point_cloud) == -1)
         {
-            lines_auxiliary_proj1.emplace_back(lines_lsd_proj[*it]);
-            cout << *it << " ";
-        }
-        cout << endl;
-
-        cout << "Please enter how many auxiliary lines in second direction to selected in projection image." << endl;
-        cin >> auxiliary_num;
-        cout << "Please selected lines." << endl;
-        for(int i = 0 ; i < auxiliary_num ; i++)
-        {
-            cin >> label_line_selected;
-            label_lines_auxiliary_proj2.emplace_back(label_line_selected);
-        }
-        lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(2));
-        lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(3));
-        for(auto it = label_lines_auxiliary_proj2.begin() ; it != label_lines_auxiliary_proj2.end() ; ++it)
-        {
-            lines_auxiliary_proj2.emplace_back(lines_lsd_proj[*it]);
-            cout << *it << " ";
-        }
-        cout << endl;
-
-        intersection_pts_proj[0] = calcVanishingPoint(lines_auxiliary_proj1);
-        intersection_pts_proj[1] = calcVanishingPoint(lines_auxiliary_proj2);
-    #endif
-
-        cout << "The intersection point in projection image are:" << endl;
-        cout << intersection_pts_proj << endl;
-
-        R_w_l = calcRotation(camera_inner , intersection_pts_proj);//现在都暂定的是相机内参的标定是准确的
-        R_l_c = R_w_l * (R_w_c.inverse());
-        cout << " r_l_c is " << R_l_c  << endl; 
-
-        t_l_w = calcPose(camera_inner , intersection_pts_proj , 60);
-        t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
-        t_l_c = t_c_w - t_l_w;
-        cout << " t_l_c is " << t_l_w << endl;
-
-        Eigen::Matrix3d rotation_tmp = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
-        cout << "matrix this group is " << rotation_tmp;
-        Eigen::Quaterniond q_tmp(rotation_tmp);
-
-        Eigen::Vector3d transpose_tmp = transform_vector + t_l_c;
-        cout << "transpose this group is " << transpose_tmp << endl;
-        //Get the transform matrix between lidar and target object. Then calculate the result in this group
-
-#if calcResiduals
-        cv::Mat test_mat1;
-        test_mat1 = test.getProjectionImage(rotation_tmp , t_l_c / 100);
-
-        cv::medianBlur(test_mat1 , test_mat1 , 3);
-        cv::fastNlMeansDenoising(test_mat1 , test_mat1);
-        project_lsd->detect(test_mat1 , lines_lsd_proj_R);
-        sort(lines_lsd_proj_R.begin() , lines_lsd_proj_R.end() , sort_lines_by_length());
-        lines_lsd_proj_R.resize(max_proj_lines_num);
-        cv::Mat lsd_proj_gray_R = test_mat1.clone();
-        project_lsd->drawSegments(lsd_proj_gray_R , lines_lsd_proj_R);
-        for(int i = 0 ; i < lines_lsd_proj_R.size() ; ++i)
-        {
-            cv::putText(lsd_proj_gray_R , to_string(i) , cv::Point((lines_lsd_proj_R[i](0) + lines_lsd_proj_R[i](2)) / 2 , (lines_lsd_proj_R[i](1) + lines_lsd_proj_R[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-        }
-        cv::imshow("projection_residuals" , lsd_proj_gray_R);
-        cv::waitKey(3000);
-
-        label_lines_selected_proj_R.clear();
-        lines_selected_proj_R.clear();
-        triangle_res.clear();
-
-        cout << "Please select the same lines in new projection image to calculate residuals." << endl;
-        for(int i = 0 ; i < 4 ; i++)
-        {
-            cin >> label_line_selected;
-            label_lines_selected_proj_R.emplace_back(label_line_selected);
-        }
-        cout << "You have choosen lines in new projection image whose label are :" << endl;
-        for(auto it = label_lines_selected_proj_R.begin() ; it != label_lines_selected_proj_R.end() ; ++it)
-        {
-            lines_selected_proj_R.emplace_back(lines_lsd_proj_R[*it]);
-            cout << *it << " ";
-        }
-        cout << endl;
-
-        project_lsd->drawSegments(test_mat1 , lines_selected_proj_R);
-        for(int i = 0 ; i < lines_selected_proj_R.size() ; ++i)
-        {
-            cv::putText(test_mat1 , to_string(label_lines_selected_proj_R[i]) , cv::Point((lines_selected_proj_R[i](0) + lines_selected_proj_R[i](2)) / 2 , (lines_selected_proj_R[i](1) + lines_selected_proj_R[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
-        }
-        cv::imshow("proj image selected residuals" , test_mat1);
-        cv::waitKey(1000);
-
-        intersection_pts_proj_R = calcIntersectionPoint(lines_selected_proj_R);
-        cout << intersection_pts_proj_R << endl;
-
-        residuals_tmp = sqrt(pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[3]).x , 2) + pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[3]).y , 2));
-        triangle_res.emplace_back(residuals_tmp);
-        residuals_tmp = sqrt(pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[4]).x , 2) + pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[4]).y , 2));
-        triangle_res.emplace_back(residuals_tmp);
-        residuals_tmp = sqrt(pow((intersection_pts_proj_R[4] - intersection_pts_proj_R[3]).x , 2) + pow((intersection_pts_proj_R[4] - intersection_pts_proj_R[3]).y , 2));
-        triangle_res.emplace_back(residuals_tmp);
-
-        residuals[0] = (triangle_ori[0] / triangle_res[0] - triangle_ori[1] /  triangle_res[1]) * 50;
-        residuals[1] = (triangle_ori[0] / triangle_res[0] - triangle_ori[2] /  triangle_res[2]) * 50;
-        residuals[2] = (intersection_pts_orig[3] - intersection_pts_orig[4]).y / (intersection_pts_orig[3] - intersection_pts_orig[4]).x - (intersection_pts_proj_R[3] - intersection_pts_proj_R[4]).y / (intersection_pts_proj_R[3] - intersection_pts_proj_R[4]).x;
-        cout << residuals[0] << " "  << residuals[1] << " " << residuals[2] << endl;
-
-        res_weight_sum = res_weight_sum + abs(1 / (residuals[0] * residuals[1] * residuals[2]));
-        q_tmp.coeffs() = q_tmp.coeffs() * abs(1 / (residuals[0] * residuals[1] * residuals[2]));
-        transpose_tmp = transpose_tmp * abs(1 / (residuals[0] * residuals[1] * residuals[2]));
-#endif
-
-
-        q_container.emplace_back(q_tmp);
-        t_container.emplace_back(transpose_tmp);
-
-        cout <<"Type any key except 0 to add lines to optimize result." << endl;
-        cin >> exit_flag;
-
-        if(exit_flag)
-        {
-            continue;
+            ROS_ERROR("Failed load PCD file.");
+            exit(1);
         }
         else
         {
-            break;
+            ROS_INFO("Load PCD file sucessfully!");
         }
-    }
+        //Load the PCD file
 
-    cout <<"Exit!" << endl;
+        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(40.0, cv::Size(5, 5));
+        clahe->apply(image_gray, image_gray);//直方图均衡化做了图像增强
+
+        lsd->detect(image_gray , lines_lsd_orig );
+        sort(lines_lsd_orig.begin() , lines_lsd_orig.end() , sort_lines_by_length());
+        lines_lsd_orig.resize(max_proj_lines_num);
+        cv::Mat lsd_orig_gray = image_gray.clone();
+        lsd->drawSegments(lsd_orig_gray , lines_lsd_orig);
+        for(int i = 0 ; i < lines_lsd_orig.size() ; ++i)
+        {
+            cv::putText(lsd_orig_gray , to_string(i) , cv::Point((lines_lsd_orig[i](0) + lines_lsd_orig[i](2)) / 2 , (lines_lsd_orig[i](1) + lines_lsd_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+        }
+        cv::imshow("lsd origin image" , lsd_orig_gray);
+        cv::waitKey(100);
+        //Detect lines in image and show them
+
+        LidarProjection test(lidar_point_cloud);
+        Vector6d test_vector;
+        cv::Mat test_mat;
+        cv::Mat compared_mat;
+        
+        test.width = image_gray.size().width;
+        test.height = image_gray.size().height;
+        test.fx = newCameraMatrix.at<double>(0,0);
+        test.fy = newCameraMatrix.at<double>(1,1);
+        test.cx = newCameraMatrix.at<double>(0,2);
+        test.cy = newCameraMatrix.at<double>(1,2);
+        cout << test.fx << " " << test.fy << " " << test.cx << " " << test.cy << endl;
+        test.k1 = 0;
+        test.k2 = 0;
+        test.p1 = 0;
+        test.p2 = 0;
+        test.k3 = 0;
+        test.depth_weight = depth_weight;
+        test_vector << init_transform[0] , init_transform[1] , init_transform[2] , init_transform[3] , init_transform[4] , init_transform[5];
+        if(getAngle)
+        {
+            test_mat = test.getProjectionImage(test_vector);
+        }
+        else if(getMat)
+        {
+            test_mat = test.getProjectionImage(rotation_matrix , transform_vector);
+            compared_mat = test.getComparedImage(image_gray , rotation_matrix , transform_vector);
+            cv::imshow("com" , compared_mat);
+        }
+
+        cv::medianBlur(test_mat , test_mat , 3);
+        cv::fastNlMeansDenoising(test_mat , test_mat);//
+        project_lsd->detect(test_mat , lines_lsd_proj);
+        sort(lines_lsd_proj.begin() , lines_lsd_proj.end() , sort_lines_by_length());
+        lines_lsd_proj.resize(max_proj_lines_num);
+        cv::Mat lsd_proj_gray = test_mat.clone();
+        project_lsd->drawSegments(lsd_proj_gray , lines_lsd_proj);
+        for(int i = 0 ; i < lines_lsd_proj.size() ; ++i)
+        {
+            cv::putText(lsd_proj_gray , to_string(i) , cv::Point((lines_lsd_proj[i](0) + lines_lsd_proj[i](2)) / 2 , (lines_lsd_proj[i](1) + lines_lsd_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+        }
+        cv::imshow("projection_test" , lsd_proj_gray);
+        cv::waitKey(1000);
+        //Detect lines in projection image and show them
+
+        while(ros::ok())
+        {
+            int exit_flag_orig = 1;
+            label_lines_selected_orig.clear();
+            lines_selected_orig.clear();
+            /*选取原始图像上的一组正交直线*/
+            ROS_INFO("Please select 1 sets of lines in origin image.");
+            for(int i = 0 ; i < 4 ; i++)
+            {
+                cin >> label_line_selected;
+                label_lines_selected_orig.emplace_back(label_line_selected);
+            }
+            cout << "You have choosen lines in origin image whose label are :" << endl;
+
+            for(auto it = label_lines_selected_orig.begin() ; it != label_lines_selected_orig.end() ; ++it)
+            {
+                lines_selected_orig.emplace_back(lines_lsd_orig[*it]);
+                cout << *it << " ";
+            }
+            cout << endl;
+
+            lsd->drawSegments(image_gray , lines_selected_orig);
+            for(int i = 0 ; i < lines_selected_orig.size() ; ++i)
+            {
+                cv::putText(image_gray , to_string(label_lines_selected_orig[i]) , cv::Point((lines_selected_orig[i](0) + lines_selected_orig[i](2)) / 2 , (lines_selected_orig[i](1) + lines_selected_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+            }
+            cv::imshow("lsd image selected" , image_gray);
+            cv::waitKey(100);
+            intersection_pts_orig = calcIntersectionPoint(lines_selected_orig);
+
+        #if useAuxiliaryLines
+            // Calculate the intersection points and vanishing points with auxiliary lines.
+            ROS_INFO("Please enter how many auxiliary lines in first direction to selected in origin image.");
+            cin >> auxiliary_num;
+            ROS_INFO("Please selected lines.");
+            for(int i = 0 ; i < auxiliary_num ; i++)
+            {
+                cin >> label_line_selected;
+                label_lines_auxiliary_orig1.emplace_back(label_line_selected);
+            }
+            lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(0));
+            lines_auxiliary_orig1.emplace_back(lines_selected_orig.at(1));
+            for(auto it = label_lines_auxiliary_orig1.begin() ; it != label_lines_auxiliary_orig1.end() ; ++it)
+            {
+                lines_auxiliary_orig1.emplace_back(lines_lsd_orig[*it]);
+                cout << *it << " ";
+            }
+            cout << endl;
+
+            ROS_INFO("Please enter how many auxiliary lines in second direction to selected in  origin image.");
+            cin >> auxiliary_num;
+            ROS_INFO("Please selected lines.");
+            for(int i = 0 ; i < auxiliary_num ; i++)
+            {
+                cin >> label_line_selected;
+                label_lines_auxiliary_orig2.emplace_back(label_line_selected);
+            }
+            lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(2));
+            lines_auxiliary_orig2.emplace_back(lines_selected_orig.at(3));
+            for(auto it = label_lines_auxiliary_orig2.begin() ; it != label_lines_auxiliary_orig2.end() ; ++it)
+            {
+                lines_auxiliary_orig2.emplace_back(lines_lsd_orig[*it]);
+                cout << *it << " ";
+            }
+            cout << endl;
+
+            intersection_pts_orig[0] = calcVanishingPoint(lines_auxiliary_orig1);
+            intersection_pts_orig[1] = calcVanishingPoint(lines_auxiliary_orig2);
+        #endif
+
+            cout << "The intersection points in origin image are:" << endl;
+            cout << intersection_pts_orig << endl;
+
+        #if calcResiduals
+            // Calculate residuals to optimize the quaternion of rotation.
+            residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[3]).y , 2));
+            triangle_ori.emplace_back(residuals_tmp);
+            residuals_tmp = sqrt(pow((intersection_pts_orig[2] - intersection_pts_orig[4]).x , 2) + pow((intersection_pts_orig[2] - intersection_pts_orig[4]).y , 2));
+            triangle_ori.emplace_back(residuals_tmp);
+            residuals_tmp = sqrt(pow((intersection_pts_orig[4] - intersection_pts_orig[3]).x , 2) + pow((intersection_pts_orig[4] - intersection_pts_orig[3]).y , 2));
+            triangle_ori.emplace_back(residuals_tmp);
+        #endif
+
+            R_w_c = calcRotation(camera_inner , intersection_pts_orig);
+            t_c_w = calcPose(camera_inner , intersection_pts_orig , line_length);
+            cout << "t_c_w" << t_c_w << endl;
+            //Get the transform matrix between camera and target object.
+
+        /************************************************************************************/
+            while(ros::ok())
+            {
+                int exit_flag_proj = 1;
+                label_lines_selected_proj.clear();
+                lines_selected_proj.clear();
+                ROS_INFO("Please select the same lines in projection image.");
+                for(int i = 0 ; i < 4 ; i++)
+                {
+                    cin >> label_line_selected;
+                    label_lines_selected_proj.emplace_back(label_line_selected);
+                }
+                cout << "You have choosen lines in projection image whose label are :" << endl;
+                for(auto it = label_lines_selected_proj.begin() ; it != label_lines_selected_proj.end() ; ++it)
+                {
+                    lines_selected_proj.emplace_back(lines_lsd_proj[*it]);
+                    cout << *it << " ";
+                }
+                cout << endl;
+                project_lsd->drawSegments(test_mat , lines_selected_proj);
+                for(int i = 0 ; i < lines_selected_proj.size() ; ++i)
+                {
+                    cv::putText(test_mat , to_string(label_lines_selected_proj[i]) , cv::Point((lines_selected_proj[i](0) + lines_selected_proj[i](2)) / 2 , (lines_selected_proj[i](1) + lines_selected_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+                }
+                cv::imshow("proj image selected" , test_mat);
+                cv::waitKey(1000);
+                //Select lines that will be used in calibration manually and show them
+                intersection_pts_proj = calcIntersectionPoint(lines_selected_proj);
+
+            #if useAuxiliaryLines
+                //选择投影图像用于消失点计算的辅助直线
+                ROS_INFO("Please enter how many auxiliary lines in first direction to selected in projection image.");
+                cin >> auxiliary_num;
+                ROS_INFO("Please selected lines.");
+                for(int i = 0 ; i < auxiliary_num ; i++)
+                {
+                    cin >> label_line_selected;
+                    label_lines_auxiliary_proj1.emplace_back(label_line_selected);
+                }
+                lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(0));
+                lines_auxiliary_proj1.emplace_back(lines_selected_proj.at(1));
+                for(auto it = label_lines_auxiliary_proj1.begin() ; it != label_lines_auxiliary_proj1.end() ; ++it)
+                {
+                    lines_auxiliary_proj1.emplace_back(lines_lsd_proj[*it]);
+                    cout << *it << " ";
+                }
+                cout << endl;
+
+                ROS_INFO("Please enter how many auxiliary lines in second direction to selected in projection image.");
+                cin >> auxiliary_num;.
+                ROS_INFO("Please selected lines.");
+                for(int i = 0 ; i < auxiliary_num ; i++)
+                {
+                    cin >> label_line_selected;
+                    label_lines_auxiliary_proj2.emplace_back(label_line_selected);
+                }
+                lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(2));
+                lines_auxiliary_proj2.emplace_back(lines_selected_proj.at(3));
+                for(auto it = label_lines_auxiliary_proj2.begin() ; it != label_lines_auxiliary_proj2.end() ; ++it)
+                {
+                    lines_auxiliary_proj2.emplace_back(lines_lsd_proj[*it]);
+                    cout << *it << " ";
+                }
+                cout << endl;
+
+                intersection_pts_proj[0] = calcVanishingPoint(lines_auxiliary_proj1);
+                intersection_pts_proj[1] = calcVanishingPoint(lines_auxiliary_proj2);
+            #endif
+
+                cout << "The intersection point in projection image are:" << endl;
+                cout << intersection_pts_proj << endl;
+
+                R_w_l = calcRotation(camera_inner , intersection_pts_proj);//现在都暂定的是相机内参的标定是准确的
+                R_l_c = R_w_l * (R_w_c.inverse());
+                cout << " r_l_c is " << R_l_c  << endl; 
+
+                t_l_w = calcPose(camera_inner , intersection_pts_proj , line_length);
+                // t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
+                t_l_c = t_c_w - t_l_w;
+                cout << " t_l_c is " << t_l_w << endl;
+
+                Eigen::Matrix3d rotation_tmp = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
+                ROS_INFO("matrix this group is \n");
+                cout << rotation_tmp << endl;;
+                Eigen::Quaterniond q_tmp(rotation_tmp);
+
+                Eigen::Vector3d transpose_tmp = transform_vector + t_l_c;
+                ROS_INFO("transpose this group is \n");
+                cout << transpose_tmp << endl;
+                //Get the transform matrix between lidar and target object. Then calculate the result in this group
+
+
+        #if calcResiduals
+                cv::Mat test_mat1;
+                test_mat1 = test.getProjectionImage(rotation_tmp , t_l_c / 100);
+                compared_mat = test.getComparedImage(image_gray , rotation_tmp , transform_vector);
+                cv::imshow("compare result" , compared_mat);//show compare result
+
+                cv::medianBlur(test_mat1 , test_mat1 , 3);
+                cv::fastNlMeansDenoising(test_mat1 , test_mat1);
+                project_lsd->detect(test_mat1 , lines_lsd_proj_R);
+                sort(lines_lsd_proj_R.begin() , lines_lsd_proj_R.end() , sort_lines_by_length());
+                lines_lsd_proj_R.resize(max_proj_lines_num);
+                cv::Mat lsd_proj_gray_R = test_mat1.clone();
+                project_lsd->drawSegments(lsd_proj_gray_R , lines_lsd_proj_R);
+                for(int i = 0 ; i < lines_lsd_proj_R.size() ; ++i)
+                {
+                    cv::putText(lsd_proj_gray_R , to_string(i) , cv::Point((lines_lsd_proj_R[i](0) + lines_lsd_proj_R[i](2)) / 2 , (lines_lsd_proj_R[i](1) + lines_lsd_proj_R[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+                }
+                cv::imshow("projection_residuals" , lsd_proj_gray_R);
+                cv::waitKey(3000);
+
+                label_lines_selected_proj_R.clear();
+                lines_selected_proj_R.clear();
+                triangle_res.clear();
+
+                ROS_INFO("Please select the same lines in new projection image to calculate residuals.");
+                for(int i = 0 ; i < 4 ; i++)
+                {
+                    cin >> label_line_selected;
+                    label_lines_selected_proj_R.emplace_back(label_line_selected);
+                }
+                cout << "You have choosen lines in new projection image whose label are :" << endl;
+                for(auto it = label_lines_selected_proj_R.begin() ; it != label_lines_selected_proj_R.end() ; ++it)
+                {
+                    lines_selected_proj_R.emplace_back(lines_lsd_proj_R[*it]);
+                    cout << *it << " ";
+                }
+                cout << endl;
+
+                project_lsd->drawSegments(test_mat1 , lines_selected_proj_R);
+                for(int i = 0 ; i < lines_selected_proj_R.size() ; ++i)
+                {
+                    cv::putText(test_mat1 , to_string(label_lines_selected_proj_R[i]) , cv::Point((lines_selected_proj_R[i](0) + lines_selected_proj_R[i](2)) / 2 , (lines_selected_proj_R[i](1) + lines_selected_proj_R[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+                }
+                cv::imshow("proj image selected residuals" , test_mat1);
+                cv::waitKey(1000);
+
+                intersection_pts_proj_R = calcIntersectionPoint(lines_selected_proj_R);
+                cout << intersection_pts_proj_R << endl;
+
+                residuals_tmp = sqrt(pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[3]).x , 2) + pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[3]).y , 2));
+                triangle_res.emplace_back(residuals_tmp);
+                residuals_tmp = sqrt(pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[4]).x , 2) + pow((intersection_pts_proj_R[2] - intersection_pts_proj_R[4]).y , 2));
+                triangle_res.emplace_back(residuals_tmp);
+                residuals_tmp = sqrt(pow((intersection_pts_proj_R[4] - intersection_pts_proj_R[3]).x , 2) + pow((intersection_pts_proj_R[4] - intersection_pts_proj_R[3]).y , 2));
+                triangle_res.emplace_back(residuals_tmp);
+
+                residuals[0] = (triangle_ori[0] / triangle_res[0] - triangle_ori[1] /  triangle_res[1]) * 50;
+                residuals[1] = (triangle_ori[0] / triangle_res[0] - triangle_ori[2] /  triangle_res[2]) * 50;
+                // residuals[0] = 1;
+                // residuals[1] = 1;
+                residuals[2] = (intersection_pts_orig[3] - intersection_pts_orig[4]).y / (intersection_pts_orig[3] - intersection_pts_orig[4]).x - (intersection_pts_proj_R[3] - intersection_pts_proj_R[4]).y / (intersection_pts_proj_R[3] - intersection_pts_proj_R[4]).x;
+                cout << "The residuals of this group is" << residuals[0] << " "  << residuals[1] << " " << residuals[2] << endl;
+
+                res_weight_sum = res_weight_sum + abs(2 / (residuals[0] + residuals[1]) + 1 / residuals[2]);
+                q_tmp.coeffs() = q_tmp.coeffs() * abs(2 / (residuals[0] + residuals[1]) + 1 / residuals[2]);
+                transpose_tmp = transpose_tmp * abs(2 / (residuals[0] + residuals[1]) + 1 / residuals[2]);
+        #endif
+
+
+                q_container.emplace_back(q_tmp);
+                t_container.emplace_back(transpose_tmp);
+
+                ROS_INFO("Type any key except 0 to add group of lines in projection image to optimize result.");
+                cin >> exit_flag_proj;
+                if(exit_flag_proj)
+                {
+                    continue;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            ROS_INFO("Type any key except 0 to add group of lines in origin image to optimize result.");
+            cin >> exit_flag_orig;
+            if(exit_flag_orig)
+            {
+                continue;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        ROS_INFO("Exit!");
+        cv::destroyAllWindows();
+    }
 
     Eigen::Quaterniond q_result(0.0 , 0.0 , 0.0 , 0.0);
     Eigen::Vector3d t_result(0.0 , 0.0 , 0.0);
@@ -672,6 +719,10 @@ int main(int argc , char **argv)
         cout << result_matrix << endl;
     }
     ROS_INFO("The transpose between lidar and camera is : \n");
+    cout << t_result << endl;
+
+
+    
 
     cv::waitKey(0);
     return 0;

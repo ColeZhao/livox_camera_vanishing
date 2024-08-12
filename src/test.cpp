@@ -41,10 +41,10 @@ double line_length;
 //Calibration parameters
 
 
-cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 0.8 , 2.5 , 20 , 0.0 , 0.7);
-cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 0.8 , 1.5 , 30 , 0.0 , 0.65);
-// cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 3.0 , 20 , 0.0 , 0.7);
-// cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 1.0 , 1.8 , 20 , 0.0 , 0.65); //这是一组老参数
+// cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 0.8 , 2.5 , 20 , 0.0 , 0.7);
+// cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.99 , 0.8 , 1.5 , 30 , 0.0 , 0.65);
+cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_NONE , 0.8 , 0.6 , 1.5 , 15 , 0.0 , 0.9);
+cv::Ptr<cv::LineSegmentDetector> project_lsd = cv::createLineSegmentDetector(cv::LSD_REFINE_ADV , 0.8 , 0.8 , 1.5 , 25 , 0.0 , 0.65);
 
 
 vector<cv::Vec4f> lines_lsd_orig;
@@ -327,31 +327,21 @@ int main(int argc , char **argv)
             ROS_INFO("Load PCD file sucessfully!");
         }
         //Load the PCD file
-        ros::Time begin_t_init = ros::Time::now();
 
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(40.0, cv::Size(5, 5));
-        // if(i != 1)
-        // {
-            clahe->apply(image_gray, image_gray);//直方图均衡化做了图像增强
-        // }//有一组数据没用直方图均衡化
+        // clahe->apply(image_gray, image_gray);//直方图均衡化做了图像增强
 
         lsd->detect(image_gray , lines_lsd_orig );
         sort(lines_lsd_orig.begin() , lines_lsd_orig.end() , sort_lines_by_length());
         lines_lsd_orig.resize(max_proj_lines_num);
         cv::Mat lsd_orig_gray = image_gray.clone();
         lsd->drawSegments(lsd_orig_gray , lines_lsd_orig);
-
         for(int i = 0 ; i < lines_lsd_orig.size() ; ++i)
-        {   
-            cv::line(lsd_orig_gray, cv::Point(lines_lsd_orig[i](0) , lines_lsd_orig[i](1)) ,cv::Point(lines_lsd_orig[i](2) , lines_lsd_orig[i](3)) ,cv::Scalar(0 , 0 , 255) , 1);
-            // cv::putText(lsd_orig_gray , to_string(i) , cv::Point((lines_lsd_orig[i](0) + lines_lsd_orig[i](2)) / 2 , (lines_lsd_orig[i](1) + lines_lsd_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 1);
-
+        {
             cv::putText(lsd_orig_gray , to_string(i) , cv::Point((lines_lsd_orig[i](0) + lines_lsd_orig[i](2)) / 2 , (lines_lsd_orig[i](1) + lines_lsd_orig[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
         }
-
-        cv::imwrite("/home/collar/data/result/orig_lsd.png" , lsd_orig_gray);
         cv::imshow("lsd origin image" , lsd_orig_gray);
-        // cv::waitKey(100);
+        cv::waitKey(100);
         //Detect lines in image and show them
 
         LidarProjection test(lidar_point_cloud);
@@ -371,19 +361,6 @@ int main(int argc , char **argv)
         test.p2 = dist_coeffs[3];
         test.k3 = dist_coeffs[4];
         test.depth_weight = depth_weight;
-        // if(i == 1)
-        // {
-        //     // test.depth_weight = 1;
-        //     line_length = 160;
-        // }
-        // else if(i == 2)
-        // {
-        //     line_length = 75; 
-        // }
-        // else if(i == 3)
-        // {
-        //     line_length = 75;
-        // }
         test_vector << init_transform[0] , init_transform[1] , init_transform[2] , init_transform[3] , init_transform[4] , init_transform[5];
         if(getAngle)
         {
@@ -394,13 +371,10 @@ int main(int argc , char **argv)
             test_mat = test.getProjectionImage(rotation_matrix , transform_vector);
             compared_mat = test.getComparedImage(image_gray , rotation_matrix , transform_vector);
             cv::imshow("com" , compared_mat);
-            // cv::imwrite("/home/collar/data/result/result.png" , compared_mat);
         }
 
         cv::medianBlur(test_mat , test_mat , 3);
         cv::fastNlMeansDenoising(test_mat , test_mat);//
-
-        // cv::imwrite("/home/collar/data/result/projection.png" , test_mat);
         project_lsd->detect(test_mat , lines_lsd_proj);
         sort(lines_lsd_proj.begin() , lines_lsd_proj.end() , sort_lines_by_length());
         lines_lsd_proj.resize(max_proj_lines_num);
@@ -408,17 +382,10 @@ int main(int argc , char **argv)
         project_lsd->drawSegments(lsd_proj_gray , lines_lsd_proj);
         for(int i = 0 ; i < lines_lsd_proj.size() ; ++i)
         {
-            cv::line(lsd_proj_gray, cv::Point(lines_lsd_proj[i](0) , lines_lsd_proj[i](1)) ,cv::Point(lines_lsd_proj[i](2) , lines_lsd_proj[i](3)) ,cv::Scalar(0 , 0 , 255) , 1);
-            // cv::putText(lsd_proj_gray , to_string(i) , cv::Point((lines_lsd_proj[i](0) + lines_lsd_proj[i](2)) / 2 , (lines_lsd_proj[i](1) + lines_lsd_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 1);
             cv::putText(lsd_proj_gray , to_string(i) , cv::Point((lines_lsd_proj[i](0) + lines_lsd_proj[i](2)) / 2 , (lines_lsd_proj[i](1) + lines_lsd_proj[i](3)) / 2 ) ,cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
         }
-
-        // cv::imwrite("/home/collar/data/result/projection_lsd.png" , lsd_proj_gray);
         cv::imshow("projection_test" , lsd_proj_gray);
-        ros::Time end_t_init = ros::Time::now();
-        cout << "init time taken " << (end_t_init-begin_t_init).toSec() << endl;
         cv::waitKey(1000);
-
         //Detect lines in projection image and show them
 
         while(ros::ok())
@@ -428,8 +395,6 @@ int main(int argc , char **argv)
             lines_selected_orig.clear();
             /*选取原始图像上的一组正交直线*/
             ROS_INFO("Please select 1 sets of lines in origin image.");
-
-            // cv::waitKey(0);
             for(int i = 0 ; i < 4 ; i++)
             {
                 cin >> label_line_selected;
@@ -506,23 +471,18 @@ int main(int argc , char **argv)
             triangle_ori.emplace_back(residuals_tmp);
         #endif
 
-            ros::Time begin_t_orin = ros::Time::now();
             R_w_c = calcRotation(camera_inner , intersection_pts_orig);
             t_c_w = calcPose(camera_inner , intersection_pts_orig , line_length);
-            ros::Time end_t_orin = ros::Time::now();
-            cout << "orin time taken " << (end_t_orin-begin_t_orin).toSec() << endl;
             cout << "t_c_w" << t_c_w << endl;
             //Get the transform matrix between camera and target object.
 
         /************************************************************************************/
             while(ros::ok())
             {
-
                 int exit_flag_proj = 1;
                 label_lines_selected_proj.clear();
                 lines_selected_proj.clear();
                 ROS_INFO("Please select the same lines in projection image.");
-                // cv::waitKey(0);
                 for(int i = 0 ; i < 4 ; i++)
                 {
                     cin >> label_line_selected;
@@ -587,34 +547,31 @@ int main(int argc , char **argv)
 
                 cout << "The intersection point in projection image are:" << endl;
                 cout << intersection_pts_proj << endl;
-                ros::Time begin_t = ros::Time::now();
 
                 R_w_l = calcRotation(camera_inner , intersection_pts_proj);//现在都暂定的是相机内参的标定是准确的
                 R_l_c = R_w_l * (R_w_c.inverse());
                 cout << " r_l_c is " << R_l_c  << endl; 
 
                 t_l_w = calcPose(camera_inner , intersection_pts_proj , line_length);
-                // t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
+                t_l_w = R_l_c.inverse() * t_l_w;//如果是小角度的话其实可以忽略掉
                 t_l_c = t_c_w - t_l_w;
                 cout << " t_l_c is " << t_l_w << endl;
 
                 Eigen::Matrix3d rotation_tmp = R_l_c * rotation_matrix;//这里应该不是简单的叠加，是在原有基础上再转 0 . 1 2
                 ROS_INFO("matrix this group is \n");
-                cout << rotation_tmp << endl;;
-                Eigen::Quaterniond q_tmp(rotation_tmp);
+                cout << R_l_c << endl;;
+                Eigen::Quaterniond q_tmp(R_l_c);
 
                 Eigen::Vector3d transpose_tmp = transform_vector + t_l_c;
                 ROS_INFO("transpose this group is \n");
                 cout << transpose_tmp << endl;
-                ros::Time end_t = ros::Time::now();
-                cout << "time taken " << (end_t-begin_t).toSec() << endl;
                 //Get the transform matrix between lidar and target object. Then calculate the result in this group
 
 
         #if calcResiduals
                 cv::Mat test_mat1;
                 test_mat1 = test.getProjectionImage(rotation_tmp , t_l_c / 100);
-                compared_mat = test.getComparedImage(image_gray , rotation_tmp , transpose_tmp/100);
+                compared_mat = test.getComparedImage(image_gray , rotation_tmp , transform_vector);
                 cv::imshow("compare result" , compared_mat);//show compare result
 
                 cv::medianBlur(test_mat1 , test_mat1 , 3);
@@ -631,7 +588,6 @@ int main(int argc , char **argv)
                 cv::imshow("projection_residuals" , lsd_proj_gray_R);
                 cv::waitKey(3000);
 
-                // cv::waitKey(0);
                 label_lines_selected_proj_R.clear();
                 lines_selected_proj_R.clear();
                 triangle_res.clear();

@@ -1,45 +1,40 @@
 frame_num: 1
 
-image_file0: "/home/collar/data/vanishing_data/000000.png"
-pcd_file0: "/home/collar/data/vanishing_data/000000.pcd"
+image_file0: "/home/collar/data/vanishing_data/used_for_calib.png"
+pcd_file0: "/home/collar/data/vanishing_data/segment.pcd"
 
-image_file1: "/home/collar/data/vanishing_data/16.png"
-pcd_file1: "/home/collar/data/vanishing_data/16.pcd"
+image_file1: "/home/collar/data/vanishing_data/30.png"
+pcd_file1: "/home/collar/data/vanishing_data/30.pcd"
 
-image_file2: "/home/collar/data/vanishing_data/17.png"
-pcd_file2: "/home/collar/data/vanishing_data/17.pcd"
+image_file2: "/home/collar/data/vanishing_data/36.png"
+pcd_file2: "/home/collar/data/vanishing_data/36.pcd"
 
-image_file3: "/home/collar/data/vanishing_data/18.png"
-pcd_file3: "/home/collar/data/vanishing_data/18.pcd"
+image_file3: "/home/collar/data/vanishing_data/43.png"
+pcd_file3: "/home/collar/data/vanishing_data/43.pcd"
 
 image_file4: "/home/collar/data/vanishing_data/19.png"
 pcd_file4: "/home/collar/data/vanishing_data/19.pcd"
 # image_file1: "/home/collar/data/vanishing_data/17.png"
 # pcd_file1: "/home/collar/data/vanishing_data/17.pcd"
 
-# camera:
-#     camera_inner: [1196.4418565730384, 0.0,      717.7188725924585,
-#                 0.0,     1196.3710009482545,  581.0874277311857,
-#                 0.0,     0.0,      1.0]
-#     # camera_distortion: [-0, -0, -0, 0, 0.0]
-#     camera_distortion: [-0.09416244866122019, 0.08403929739634683, -0.00018055391689027767, -3.122884805295416e-05, 0.0]
-
 camera:
-    camera_inner: [900.72013997978, 0.0,      1064.69347473416,
-                0.0,     900.85380533831,  757.351332219563,
+    camera_inner: [1201.8936815702275, 0.0,      739.7807181976664,
+                0.0,     1202.4772314914144,  586.0631578174615,
                 0.0,     0.0,      1.0]
     # camera_distortion: [-0, -0, -0, 0, 0.0]
-    camera_distortion: [-0, 0, -0, -0, 0.0]
+    camera_distortion: [-0.09763070228741298, 0.08783924399747378, 0.0005938449882693059, -0.0005157171762805812, 0.0]
+
+
 
 calib:
-    depth_weight: 0
-    ExtrinsicMat: [0 , -1 , 0 , 0 ,
-                   -0 , 0  , -1 , 0. ,
-                   1 , 0  , -0 , -0.,
+    depth_weight: 0.1
+    ExtrinsicMat: [0 , 0 , 1 , 0 ,
+                   -1 , 0  , 0 , 0. ,
+                   0 , -1  , 0 , -0.,
                    0.0 , 0.0 , 0.0 , 1.0]
-    # ExtrinsicMat: [0.00435475 , -1.00001 , -0.00687247 , 0.050166 ,
-    #                 -0.0190299 , 0.0239115  , -0.999371 , -0.002574116 ,
-    #                 0.999811 , 0.00435586  , -0.0189015 , -0.0312415,
+    # ExtrinsicMat: [0.00633139 , -0.999873 , -0.0146142 , 0.0442988 ,
+    #                 -0.0115567 , 0.0145403  , -0.999827 , 0.0331367 ,
+    #                 0.999913 , 0.00649919  , -0.0114631 , 0.0374356,
     #                 0.0 , 0.0 , 0.0 , 1.0]
     # ExtrinsicMat: [0.00604422 , -0.999642 ,-0.0260457 , 0.0712932 ,
     #                -0.0104192 , 0.0259818  , -0.999608 , -0.0320054 ,

@@ -36,7 +36,7 @@ class LidarProjection
         pcl::PointCloud<pcl::PointXYZI>::Ptr lidar_orig_cloud;
 
         double min_depth = 1.0;
-        double max_depth = 10.0;
+        double max_depth =30.0;
         double fx , fy , cx , cy;
         double k1 , k2 , p1 , p2 , k3;
         int height , width;
@@ -61,6 +61,7 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
 
     rotation_vector = Eigen::AngleAxisd(extrinsic_params[0] , Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(extrinsic_params[1] , Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(extrinsic_params[2] , Eigen::Vector3d::UnitX());
 
+    #pragma omp parallel for num_threads(16)
     for(u_int32_t i = 0 ; i < lidar_cloud->size() ; i++)
     {
         pcl::PointXYZI point_3d = lidar_cloud->points[i];
@@ -95,6 +96,7 @@ void LidarProjection::projection(const Vector6d &extrinsic_params , const pcl::P
     cv::Mat image_project = cv::Mat::zeros(height , width , CV_16UC1);
     cv::Mat rgb_image_project = cv::Mat::zeros(height , width , CV_8UC3);
 
+    #pragma omp parallel for num_threads(16)
     for(u_int64_t i = 0 ; i < pts_2d.size() ; ++i)
     {
         cv::Point2f point_2d = pts_2d[i];
@@ -168,6 +170,7 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
     cv::Mat image_project = cv::Mat::zeros(height , width , CV_16UC1);
     cv::Mat rgb_image_project = cv::Mat::zeros(height , width , CV_8UC3);
 
+
     for(u_int64_t i = 0 ; i < pts_2d.size() ; ++i)
     {
         cv::Point2f point_2d = pts_2d[i];
@@ -177,23 +180,23 @@ void LidarProjection::projection(const Eigen::Matrix3d &rotation_matrix , const 
         }
         else
         {
+
             float depth = sqrt(pow(pts_3d[i].x - transform_vector[0] , 2) + pow(pts_3d[i].y - transform_vector[1], 2) +pow(pts_3d[i].z - transform_vector[2], 2));
             if(image_project.at<ushort>(point_2d.y, point_2d.x) == 0 || depth < image_project.at<ushort>(point_2d.y, point_2d.x))
             {
                 float intensity = intensity_list[i];
-                float gray = depth_weight * depth / max_depth_pt * 65535 + (1 - depth_weight) * intensity / max_intensity_pt * 65535;
+                float gray = depth_weight * depth / max_depth_pt * 65535 +  intensity / max_intensity_pt * 65535 *(1 - depth_weight);
                 image_project.at<ushort>(point_2d.y, point_2d.x) = gray;
                 rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[0] = depth / max_depth_pt * 255;
                 rgb_image_project.at<cv::Vec3b>(point_2d.y, point_2d.x)[1] = intensity / max_intensity_pt * 255;
+
             }
         }
     }
+
+    // cv::imwrite("/home/collar/data/result/projection_rgb.png" , rgb_image_project);
     image_project.convertTo(image_project, CV_8UC1, 1 / 256.0);
-    // for(int i = 0 ; i < 5 ; i++)
-    // {
-    //     image_project = fillImg(image_project);
-    // }
-    //这个fill_img可能需要修改一下
+
     projection_img = image_project.clone();//对这里的depth进行优化求解
     pts_3d.clear();
     intensity_list.clear();
