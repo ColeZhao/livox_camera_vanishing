@@ -34,18 +34,8 @@ include_directories(
   ${PCL_INCLUDE_DIRS}
 )
 
-add_executable(vanishing_calib src/livox_camera_vanishing_node.cpp include/lidar_projection.hpp)
-add_executable(vanishing_calib_multi_group src/livox_camera_vanishing_multi_group_node.cpp include/lidar_projection.hpp)
-add_executable(csv2pcd src/trans_test.cpp)
-add_executable(test_sim src/test.cpp)
 
-target_link_libraries(vanishing_calib
-  ${catkin_LIBRARIES}
-  ${Eigen3_LIBS}
-  ${OpenCV_LIBS}
-  ${PCL_LIBS}
-  ${CERES_LIBRARIES}
-)
+add_executable(vanishing_calib_multi_group src/livox_camera_vanishing_multi_group_node.cpp include/lidar_projection.hpp)
 
 target_link_libraries(vanishing_calib_multi_group
   ${catkin_LIBRARIES}
@@ -55,18 +45,3 @@ target_link_libraries(vanishing_calib_multi_group
   ${CERES_LIBRARIES}
 )
 
-target_link_libraries(csv2pcd
-  ${catkin_LIBRARIES}
-  ${Eigen3_LIBS}
-  ${OpenCV_LIBS}
-  ${PCL_LIBS}
-  ${CERES_LIBRARIES}
-)
-
-target_link_libraries(test_sim
-  ${catkin_LIBRARIES}
-  ${Eigen3_LIBS}
-  ${OpenCV_LIBS}
-  ${PCL_LIBS}
-  ${CERES_LIBRARIES}
-)

@@ -1,9 +1,0 @@
-<launch>
-  <rosparam command="load" file="$(find livox_camera_vanishing)/config/test.yaml" />
-  <node 
-    pkg="livox_camera_vanishing"
-    type="test_sim"
-    name="test_sim"
-    output="screen"
-  />
-</launch>

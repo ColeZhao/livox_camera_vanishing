@@ -44,3 +44,5 @@ Clone the repository and catkin_make:
 ## 4. Acknowledgements
 The code for converting raw LiDAR data to PCD format is based on the LCC [(Livox_Camera _Calib)](https://github.com/hku-mars/livox_camera_calib) algorithm.
 
+## 5. Licence
+The source code is released under [GPLv3](http://www.gnu.org/licenses/) license.
